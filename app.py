@@ -975,4 +975,6 @@ def internal_error(error):
 
 if __name__ == '__main__':
     init_app()
-    app.run(debug=True, host='0.0.0.0', port=8080)
+    # Cloud Run에서 PORT 환경변수 사용
+    port = int(os.environ.get('PORT', 8080))
+    app.run(debug=False, host='0.0.0.0', port=port)
