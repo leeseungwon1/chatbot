@@ -103,6 +103,31 @@ def ensure_initialization():
         rag_system = RAGSystem(storage=storage)
         logger.info("✅ RAG 시스템 초기화 완료")
         
+        # 기존 파일들 중 임베딩되지 않은 파일들 자동 임베딩
+        try:
+            files = storage.list_files()
+            logger.info(f"🔍 기존 파일 {len(files)}개 확인 중...")
+            
+            for file_info in files:
+                if not file_info.get('has_embedding', False):
+                    try:
+                        file_url = file_info.get('url')
+                        original_name = file_info.get('filename')
+                        stored_name = file_info.get('name')
+                        
+                        if file_url and original_name:
+                            logger.info(f"📄 자동 임베딩 시작: {original_name}")
+                            success = rag_system.add_document(file_url, original_name)
+                            if success:
+                                storage.mark_embedding_status(stored_name, True)
+                                logger.info(f"✅ 자동 임베딩 완료: {original_name}")
+                            else:
+                                logger.error(f"❌ 자동 임베딩 실패: {original_name}")
+                    except Exception as e:
+                        logger.error(f"❌ 자동 임베딩 중 오류: {file_info.get('filename', 'unknown')} - {e}")
+        except Exception as e:
+            logger.error(f"❌ 기존 파일 자동 임베딩 중 오류: {e}")
+        
         initialization_complete = True
         logger.info("✅ 전체 초기화 완료")
         return True

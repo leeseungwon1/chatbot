@@ -145,17 +145,37 @@ class CloudStorage:
     def delete_file(self, filename: str) -> bool:
         """파일 삭제"""
         try:
+            # 먼저 메타데이터에서 실제 저장된 파일명 찾기
+            metadata = self.get_metadata()
+            stored_filename = None
+            
+            # 원본 파일명으로 찾기
+            for stored_name, file_metadata in metadata.items():
+                if file_metadata.get('original_name') == filename:
+                    stored_filename = stored_name
+                    break
+            
+            # 원본 파일명으로 찾지 못한 경우, 저장된 파일명으로 시도
+            if not stored_filename:
+                stored_filename = filename
+            
             # 문서 파일 삭제
-            doc_blob = self.bucket.blob(f"documents/{filename}")
+            doc_blob = self.bucket.blob(f"documents/{stored_filename}")
             if doc_blob.exists():
                 doc_blob.delete()
+                logger.info(f"✅ 문서 파일 삭제: {stored_filename}")
+            else:
+                logger.warning(f"⚠️ 문서 파일을 찾을 수 없음: {stored_filename}")
             
             # 메타데이터 파일 삭제
-            metadata_blob = self.bucket.blob(f"metadata/{filename}.json")
+            metadata_blob = self.bucket.blob(f"metadata/{stored_filename}.json")
             if metadata_blob.exists():
                 metadata_blob.delete()
+                logger.info(f"✅ 메타데이터 파일 삭제: {stored_filename}.json")
+            else:
+                logger.warning(f"⚠️ 메타데이터 파일을 찾을 수 없음: {stored_filename}.json")
             
-            logger.info(f"✅ 파일 삭제 완료: {filename}")
+            logger.info(f"✅ 파일 삭제 완료: {filename} (저장된 파일명: {stored_filename})")
             return True
             
         except Exception as e:
