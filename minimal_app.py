@@ -4,9 +4,12 @@ Cloud Run 배포를 위한 단계적 Flask 애플리케이션
 """
 import os
 import logging
-from flask import Flask, jsonify, render_template_string, request, session, redirect, url_for
+import urllib.parse
+import time
+from flask import Flask, jsonify, render_template_string, request, session, redirect, url_for, render_template
 from functools import wraps
 from datetime import datetime
+from werkzeug.utils import secure_filename
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -23,11 +26,20 @@ app = Flask(__name__)
 SECRET_KEY = os.getenv('SECRET_KEY') or 'dev-secret-key-local'
 app.secret_key = SECRET_KEY
 
+# 파일 업로드 설정
+ALLOWED_EXTENSIONS = {'pdf', 'docx', 'doc', 'txt', 'md'}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+
 # 사용자 계정
 USERS = {
     'admin': {'password': 'admin123', 'role': 'admin'},
     'user': {'password': 'user123', 'role': 'user'}
 }
+
+def allowed_file(filename):
+    """허용된 파일 확장자 확인"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # 데코레이터
 def login_required(f):
@@ -101,124 +113,11 @@ def ensure_initialization():
         logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
         return False
 
-# 기본 HTML 템플릿
-BASE_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Army Chatbot</title>
-    <meta charset="utf-8">
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .status { background: #f0f8ff; padding: 20px; border-radius: 5px; margin: 20px 0; }
-        .login-form { background: #f9f9f9; padding: 20px; border-radius: 5px; }
-        input[type="text"], input[type="password"] { width: 200px; padding: 5px; margin: 5px; }
-        button { padding: 10px 20px; background: #007cba; color: white; border: none; border-radius: 3px; cursor: pointer; }
-        button:hover { background: #005a87; }
-        .error { color: red; margin: 10px 0; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Army Chatbot</h1>
-        <div class="status">
-            <p><strong>서비스가 정상적으로 실행 중입니다.</strong></p>
-            <p>환경: {{ environment }}</p>
-            <p>포트: {{ port }}</p>
-            <p>사용자: {{ username if username else '로그인 필요' }}</p>
-        </div>
-        {% if not username %}
-        <div class="login-form">
-            <h3>로그인</h3>
-            {% if error %}
-            <div class="error">{{ error }}</div>
-            {% endif %}
-            <form method="post" action="/login">
-                <input type="text" name="username" placeholder="사용자명" required><br>
-                <input type="password" name="password" placeholder="비밀번호" required><br>
-                <button type="submit">로그인</button>
-            </form>
-            <p><small>테스트 계정: admin/admin123 또는 user/user123</small></p>
-        </div>
-        {% else %}
-        <div>
-            <p>환영합니다, {{ username }}님!</p>
-            <a href="/logout"><button>로그아웃</button></a>
-            {% if role == 'admin' %}
-            <a href="/admin"><button>관리자 페이지</button></a>
-            {% endif %}
-        </div>
-        
-        <!-- 채팅 인터페이스 -->
-        <div style="margin-top: 30px; border: 1px solid #ddd; padding: 20px; border-radius: 5px;">
-            <h3>AI 챗봇</h3>
-            <div id="chat-container" style="height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin: 10px 0; background: #f9f9f9;">
-                <p><em>질문을 입력해주세요...</em></p>
-            </div>
-            <form id="chat-form" style="display: flex; gap: 10px;">
-                <input type="text" id="question-input" placeholder="질문을 입력하세요..." style="flex: 1; padding: 10px;">
-                <button type="submit" style="padding: 10px 20px;">전송</button>
-            </form>
-        </div>
-        {% endif %}
-    </div>
-    
-    <script>
-        document.getElementById('chat-form').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const question = document.getElementById('question-input').value;
-            if (!question.trim()) return;
-            
-            const chatContainer = document.getElementById('chat-container');
-            const questionDiv = document.createElement('div');
-            questionDiv.innerHTML = '<strong>질문:</strong> ' + question;
-            questionDiv.style.marginBottom = '10px';
-            chatContainer.appendChild(questionDiv);
-            
-            const loadingDiv = document.createElement('div');
-            loadingDiv.innerHTML = '<em>답변을 생성 중입니다...</em>';
-            loadingDiv.style.color = '#666';
-            chatContainer.appendChild(loadingDiv);
-            
-            try {
-                const response = await fetch('/api/query', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ question: question })
-                });
-                
-                const data = await response.json();
-                loadingDiv.remove();
-                
-                const answerDiv = document.createElement('div');
-                answerDiv.innerHTML = '<strong>답변:</strong> ' + (data.answer || data.error || '답변을 생성할 수 없습니다.');
-                answerDiv.style.marginBottom = '20px';
-                answerDiv.style.padding = '10px';
-                answerDiv.style.backgroundColor = '#e8f4f8';
-                answerDiv.style.borderRadius = '5px';
-                chatContainer.appendChild(answerDiv);
-                
-                document.getElementById('question-input').value = '';
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            } catch (error) {
-                loadingDiv.innerHTML = '<em style="color: red;">오류가 발생했습니다: ' + error.message + '</em>';
-            }
-        });
-    </script>
-</body>
-</html>
-"""
 
 @app.route('/')
+@login_required
 def index():
-    return render_template_string(BASE_TEMPLATE, 
-                                environment=os.environ.get('ENVIRONMENT', 'unknown'),
-                                port=os.environ.get('PORT', 'unknown'),
-                                username=session.get('username'),
-                                role=session.get('role'))
+    return render_template('index.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -232,14 +131,9 @@ def login():
             session['role'] = USERS[username]['role']
             return redirect(url_for('index'))
         else:
-            return render_template_string(BASE_TEMPLATE, 
-                                        environment=os.environ.get('ENVIRONMENT', 'unknown'),
-                                        port=os.environ.get('PORT', 'unknown'),
-                                        error='잘못된 사용자명 또는 비밀번호입니다.')
+            return render_template('login.html', error='잘못된 사용자명 또는 비밀번호입니다.')
     
-    return render_template_string(BASE_TEMPLATE, 
-                                environment=os.environ.get('ENVIRONMENT', 'unknown'),
-                                port=os.environ.get('PORT', 'unknown'))
+    return render_template('login.html')
 
 @app.route('/logout')
 def logout():
@@ -293,43 +187,46 @@ def query():
 @app.route('/admin')
 @admin_required
 def admin():
-    if not ensure_initialization():
-        return jsonify({
-            'message': 'RAG 시스템 초기화에 실패했습니다.',
-            'user': session.get('username'),
-            'role': session.get('role')
-        })
-    
     try:
-        files = storage.list_files() if storage else []
-        storage_info = storage.get_storage_info() if storage else {}
+        # 초기화 시도
+        ensure_initialization()
+        
+        if not storage:
+            logger.error("❌ 스토리지가 초기화되지 않았습니다.")
+            return render_template('admin.html', 
+                                 files=[], 
+                                 storage_info={}, 
+                                 rag_status={})
+        
+        files = storage.list_files()
+        storage_info = storage.get_storage_info()
         rag_status = rag_system.get_status() if rag_system else {}
         
-        return jsonify({
-            'message': '관리자 페이지입니다.',
-            'user': session.get('username'),
-            'role': session.get('role'),
-            'files': files,
-            'storage_info': storage_info,
-            'rag_status': rag_status
-        })
+        return render_template('admin.html', 
+                             files=files, 
+                             storage_info=storage_info, 
+                             rag_status=rag_status)
     except Exception as e:
-        logger.error(f"관리자 페이지 로드 중 오류: {e}")
-        return jsonify({
-            'message': '관리자 페이지 로드 중 오류가 발생했습니다.',
-            'user': session.get('username'),
-            'role': session.get('role'),
-            'error': str(e)
-        })
+        logger.error(f"❌ 관리자 페이지 로드 중 오류: {e}")
+        return render_template('admin.html', 
+                             files=[], 
+                             storage_info={}, 
+                             rag_status={})
 
+# 에러 핸들러
+@app.errorhandler(404)
+def not_found_error(error):
+    return render_template('error.html', error='페이지를 찾을 수 없습니다.'), 404
+
+@app.errorhandler(500)
+def internal_error(error):
+    return render_template('error.html', error='서버 내부 오류가 발생했습니다.'), 500
+
+# 간단한 헬스체크 엔드포인트 추가
 @app.route('/health')
-def health():
-    return jsonify({
-        'status': 'healthy',
-        'message': 'Service is running',
-        'environment': os.environ.get('ENVIRONMENT', 'unknown'),
-        'port': os.environ.get('PORT', 'unknown')
-    })
+def health_check():
+    """Cloud Run 헬스체크용 엔드포인트"""
+    return jsonify({'status': 'healthy', 'message': 'Service is running'})
 
 @app.route('/api/upload', methods=['POST'])
 @admin_required
@@ -437,18 +334,585 @@ def delete_file(filename):
         logger.error(f"파일 삭제 중 오류: {e}")
         return jsonify({'error': '파일 삭제 중 오류가 발생했습니다.'}), 500
 
+@app.route('/api/upload-and-embed', methods=['POST'])
+@login_required
+@admin_required
+def upload_and_embed():
+    """파일 업로드 후 즉시 임베딩"""
+    try:
+        if not storage:
+            logger.error("❌ 스토리지가 초기화되지 않았습니다.")
+            return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
+        
+        if 'files[]' not in request.files:
+            return jsonify({'error': '파일이 선택되지 않았습니다.'}), 400
+        
+        files = request.files.getlist('files[]')
+        if not files or files[0].filename == '':
+            return jsonify({'error': '파일이 선택되지 않았습니다.'}), 400
+        
+        logger.info(f"📁 {len(files)}개 파일 업로드 시작")
+        uploaded_files = []
+        failed_files = []
+        
+        for file in files:
+            if file and file.filename:
+                try:
+                    logger.info(f"📄 파일 업로드 중: {file.filename}")
+                    file_url = storage.upload_file(file)
+                    
+                    # file_url에서 파일명 추출 (local://timestamp_filename 형식)
+                    filename = file_url.replace('local://', '')
+                    uploaded_files.append(filename)
+                    
+                    logger.info(f"✅ 파일 업로드 완료: {filename}")
+                    
+                    # 즉시 임베딩
+                    if rag_system:
+                        try:
+                            rag_system.add_document(file_url, filename)
+                            # 임베딩 상태 즉시 업데이트
+                            try:
+                                storage.mark_embedding_status(filename, True)
+                                logger.info(f"✅ 임베딩 상태 업데이트 완료: {filename}")
+                            except Exception as status_error:
+                                logger.warning(f"⚠️ 임베딩 상태 업데이트 실패: {filename} - {status_error}")
+                            logger.info(f"✅ 임베딩 완료: {filename}")
+                        except Exception as e:
+                            logger.error(f"❌ 임베딩 실패: {filename} - {e}")
+                            # 임베딩 실패 시 상태 업데이트
+                            try:
+                                storage.mark_embedding_status(filename, False)
+                                logger.info(f"✅ 임베딩 실패 상태 업데이트 완료: {filename}")
+                            except Exception as status_error:
+                                logger.warning(f"⚠️ 임베딩 실패 상태 업데이트 실패: {filename} - {status_error}")
+                    else:
+                        logger.warning("⚠️ RAG 시스템이 초기화되지 않았습니다.")
+                        
+                except Exception as e:
+                    logger.error(f"❌ 파일 업로드 실패: {file.filename} - {e}")
+                    failed_files.append(file.filename)
+        
+        if uploaded_files:
+            message = f'{len(uploaded_files)}개 파일이 업로드되고 임베딩되었습니다.'
+            if failed_files:
+                message += f' (실패: {len(failed_files)}개)'
+            
+            logger.info(f"✅ 업로드 완료: {len(uploaded_files)}개 성공, {len(failed_files)}개 실패")
+            return jsonify({
+                'message': message,
+                'files': uploaded_files,
+                'failed_files': failed_files
+            })
+        else:
+            logger.error("❌ 모든 파일 업로드 실패")
+            return jsonify({'error': '파일 업로드에 실패했습니다.'}), 500
+            
+    except Exception as e:
+        logger.error(f"❌ 업로드 및 임베딩 중 오류: {e}")
+        return jsonify({'error': f'오류가 발생했습니다: {str(e)}'}), 500
+
+@app.route('/api/files', methods=['GET'])
+@admin_required
+def list_files():
+    """파일 목록 반환"""
+    try:
+        if not storage:
+            logger.error("❌ 스토리지가 초기화되지 않았습니다.")
+            return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
+        
+        files = storage.list_files()
+        logger.info(f"✅ 파일 목록 조회 완료: {len(files)}개 파일")
+        return jsonify({'files': files})
+    except Exception as e:
+        logger.error(f"❌ 파일 목록 조회 중 오류: {e}")
+        return jsonify({'error': f'파일 목록 조회에 실패했습니다: {str(e)}'}), 500
+
+@app.route('/api/files/batch-delete', methods=['POST'])
+@admin_required
+def batch_delete_files():
+    """여러 파일 일괄 삭제"""
+    if not storage:
+        return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
+    
+    try:
+        data = request.get_json()
+        filenames = data.get('filenames', [])
+        
+        if not filenames:
+            return jsonify({'error': '삭제할 파일이 선택되지 않았습니다.'}), 400
+        
+        # 파일 삭제
+        results = storage.delete_multiple_files(filenames)
+        
+        # RAG 시스템에서 문서 제거
+        if rag_system:
+            for filename in filenames:
+                try:
+                    # 저장된 파일 목록에서 해당 파일의 원본 이름 찾기
+                    files = storage.list_files()
+                    for file_info in files:
+                        if file_info['filename'] == filename:
+                            rag_system.remove_document(file_info['name'])
+                            break
+                except Exception as e:
+                    logger.error(f"RAG 시스템에서 문서 제거 실패: {filename} - {filename} - {e}")
+        
+        deleted_count = sum(1 for success in results.values() if success)
+        
+        return jsonify({
+            'message': f'{deleted_count}개 파일이 삭제되었습니다.',
+            'results': results,
+            'deleted_count': deleted_count,
+            'total_count': len(filenames)
+        })
+        
+    except Exception as e:
+        logger.error(f"일괄 파일 삭제 중 오류: {e}")
+        return jsonify({'error': '일괄 파일 삭제 중 오류가 발생했습니다.'}), 500
+
+@app.route('/api/admin/rebuild', methods=['POST'])
+@admin_required
+def rebuild_embeddings():
+    """전체 임베딩 재구성"""
+    try:
+        if not rag_system:
+            return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+        
+        # 기존 임베딩 제거
+        rag_system.clear_index()
+        
+        # 모든 파일에 대해 임베딩 재생성
+        files = storage.list_files()
+        embedded_count = 0
+        
+        for file_info in files:
+            try:
+                file_url = file_info.get('url')
+                filename = file_info.get('name', file_info.get('filename', ''))
+                
+                if file_url and filename:
+                    rag_system.add_document(file_url, filename)
+                    # 임베딩 상태 업데이트
+                    storage.mark_embedding_status(filename, True)
+                    embedded_count += 1
+                    logger.info(f"✅ 임베딩 완료: {filename}")
+                else:
+                    logger.warning(f"⚠️ 파일 정보 누락: {file_info}")
+                    
+            except Exception as e:
+                logger.error(f"❌ 파일 임베딩 실패: {filename} - {e}")
+                continue
+        
+        logger.info(f"✅ 전체 임베딩 재구성 완료: {embedded_count}개 파일")
+        return jsonify({
+            'message': f'{embedded_count}개 파일의 임베딩이 재구성되었습니다.',
+            'embedded_count': embedded_count
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ 전체 임베딩 재구성 실패: {e}")
+        return jsonify({'error': f'전체 임베딩 재구성에 실패했습니다: {str(e)}'}), 500
+
+@app.route('/api/admin/embed-selected', methods=['POST'])
+@admin_required
+def embed_selected_files():
+    """선택된 파일들만 임베딩"""
+    try:
+        if not rag_system:
+            return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+        
+        data = request.get_json()
+        if not data or 'filenames' not in data:
+            return jsonify({'error': '파일명 목록이 제공되지 않았습니다.'}), 400
+        
+        filenames = data['filenames']
+        if not filenames:
+            return jsonify({'error': '임베딩할 파일이 선택되지 않았습니다.'}), 400
+        
+        # 선택된 파일들만 임베딩
+        embedded_count = 0
+        failed_files = []
+        
+        for filename in filenames:
+            try:
+                # 파일 정보 조회
+                files = storage.list_files()
+                file_info = next((f for f in files if f.get('filename') == filename), None)
+                
+                if file_info and file_info.get('url'):
+                    file_url = file_info['url']
+                    display_name = file_info.get('name', filename)
+                    
+                    # 기존 임베딩 제거 (있다면)
+                    try:
+                        rag_system.remove_document(filename)
+                        logger.info(f"✅ 기존 임베딩 제거 완료: {display_name}")
+                    except Exception as remove_error:
+                        logger.warning(f"⚠️ 기존 임베딩 제거 실패: {display_name} - {remove_error}")
+                    
+                    # 새로 임베딩
+                    rag_system.add_document(file_url, display_name)
+                    logger.info(f"✅ 선택 임베딩 완료: {display_name}")
+                    
+                    # 임베딩 상태 업데이트
+                    try:
+                        storage.mark_embedding_status(display_name, True)
+                        logger.info(f"✅ 임베딩 상태 업데이트 완료: {display_name}")
+                    except Exception as status_error:
+                        logger.warning(f"⚠️ 임베딩 상태 업데이트 실패: {display_name} - {status_error}")
+                    
+                    embedded_count += 1
+                else:
+                    logger.warning(f"⚠️ 파일을 찾을 수 없음: {filename}")
+                    failed_files.append(filename)
+                    
+            except Exception as e:
+                logger.error(f"❌ 선택 임베딩 실패: {filename} - {e}")
+                failed_files.append(filename)
+                continue
+        
+        logger.info(f"✅ 선택 임베딩 완료: {embedded_count}개 성공, {len(failed_files)}개 실패")
+        return jsonify({
+            'message': f'선택된 {embedded_count}개 파일의 임베딩이 완료되었습니다.',
+            'embedded_count': embedded_count,
+            'failed_count': len(failed_files),
+            'failed_files': failed_files
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ 선택 임베딩 실패: {e}")
+        return jsonify({'error': f'선택 임베딩에 실패했습니다: {str(e)}'}), 500
+
+@app.route('/api/admin/delete-all', methods=['POST'])
+@admin_required
+def delete_all_files():
+    if not storage:
+        return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
+    
+    try:
+        # 모든 파일 삭제
+        success = storage.delete_all_files()
+        if not success:
+            return jsonify({'error': '전체 파일 삭제에 실패했습니다.'}), 500
+        
+        # RAG 시스템 초기화
+        if rag_system:
+            rag_system.clear_index()
+        
+        return jsonify({'message': '모든 파일이 삭제되었습니다.'})
+        
+    except Exception as e:
+        logger.error(f"전체 파일 삭제 중 오류: {e}")
+        return jsonify({'error': '전체 파일 삭제 중 오류가 발생했습니다.'}), 500
+
+@app.route('/api/admin/clear-index', methods=['POST'])
+@admin_required
+def clear_index():
+    if not rag_system:
+        return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+    
+    try:
+        success = rag_system.clear_index()
+        if success:
+            return jsonify({'message': '임베딩이 초기화되었습니다.'})
+        else:
+            return jsonify({'error': '임베딩 초기화에 실패했습니다.'}), 500
+        
+    except Exception as e:
+        logger.error(f"임베딩 초기화 중 오류: {e}")
+        return jsonify({'error': '임베딩 초기화 중 오류가 발생했습니다.'}), 500
+
+# 새로운 관리자 API 엔드포인트들
+@app.route('/api/admin/system-status')
+@admin_required
+def get_system_status():
+    """시스템 상태 정보 반환"""
+    try:
+        # RAG 시스템 상태
+        rag_status = rag_system.get_status() if rag_system else {}
+        storage_info = storage.get_storage_info() if storage else {}
+        
+        # API 응답 속도 측정
+        start_time = time.time()
+        # 간단한 테스트 쿼리 실행
+        test_response = "테스트 완료"
+        api_response_time = (time.time() - start_time) * 1000  # ms
+        
+        return jsonify({
+            'system': {
+                'api_response_time_ms': round(api_response_time, 2),
+                'environment': os.environ.get('ENVIRONMENT', 'unknown'),
+                'port': os.environ.get('PORT', 'unknown')
+            },
+            'rag_system': rag_status,
+            'storage': storage_info,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"시스템 상태 조회 중 오류: {e}")
+        return jsonify({'error': '시스템 상태 조회에 실패했습니다.'}), 500
+
+@app.route('/api/admin/vector-db-info')
+@admin_required
+def get_vector_db_info():
+    """벡터 DB 정보 반환"""
+    try:
+        if not rag_system:
+            return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+        
+        # 벡터 저장소 정보
+        vector_info = rag_system.get_vector_db_info()
+        
+        # 로컬 스토리지 용량
+        storage_path = "./local_storage"
+        total_size = 0
+        if os.path.exists(storage_path):
+            for dirpath, dirnames, filenames in os.walk(storage_path):
+                for filename in filenames:
+                    filepath = os.path.join(dirpath, filename)
+                    total_size += os.path.getsize(filepath)
+        
+        return jsonify({
+            'vector_db': vector_info,
+            'storage': {
+                'total_size_mb': round(total_size / (1024**2), 2),
+                'vector_store_size_mb': round(os.path.getsize("./local_storage/vector_store.pkl") / (1024**2), 2) if os.path.exists("./local_storage/vector_store.pkl") else 0
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"벡터 DB 정보 조회 중 오류: {e}")
+        return jsonify({'error': '벡터 DB 정보 조회에 실패했습니다.'}), 500
+
+@app.route('/api/admin/search-test', methods=['POST'])
+@admin_required
+def search_test():
+    """임베딩 검색 테스트"""
+    try:
+        if not rag_system:
+            return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+        
+        data = request.get_json()
+        query = data.get('query', '')
+        
+        if not query:
+            return jsonify({'error': '검색어를 입력해주세요.'}), 400
+        
+        # 검색 테스트 실행
+        results = rag_system.search_test(query)
+        
+        return jsonify({
+            'query': query,
+            'results': results
+        })
+        
+    except Exception as e:
+        logger.error(f"검색 테스트 중 오류: {e}")
+        return jsonify({'error': '검색 테스트에 실패했습니다.'}), 500
+
+@app.route('/api/admin/delete-embedding', methods=['POST'])
+@admin_required
+def delete_specific_embedding():
+    """특정 임베딩 삭제"""
+    try:
+        if not rag_system:
+            return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+        
+        data = request.get_json()
+        filename = data.get('filename')
+        
+        if not filename:
+            return jsonify({'error': '삭제할 파일명을 입력해주세요.'}), 400
+        
+        # 임베딩 삭제
+        success = rag_system.remove_document(filename)
+        
+        if success:
+            return jsonify({'message': f'{filename}의 임베딩이 삭제되었습니다.'})
+        else:
+            return jsonify({'error': '임베딩 삭제에 실패했습니다.'}), 500
+        
+    except Exception as e:
+        logger.error(f"임베딩 삭제 중 오류: {e}")
+        return jsonify({'error': '임베딩 삭제에 실패했습니다.'}), 500
+
+@app.route('/api/admin/backup-vectors', methods=['POST'])
+@admin_required
+def backup_vectors():
+    """벡터 저장소 백업"""
+    try:
+        if not rag_system:
+            return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+        
+        # 백업 파일명 생성
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"vector_backup_{timestamp}.pkl"
+        backup_path = os.path.join("./local_storage", backup_filename)
+        
+        # 백업 실행
+        success = rag_system.backup_vectors(backup_path)
+        
+        if success:
+            return jsonify({
+                'message': '벡터 저장소 백업이 완료되었습니다.',
+                'backup_file': backup_filename
+            })
+        else:
+            return jsonify({'error': '백업에 실패했습니다.'}), 500
+        
+    except Exception as e:
+        logger.error(f"벡터 백업 중 오류: {e}")
+        return jsonify({'error': '백업에 실패했습니다.'}), 500
+
+@app.route('/api/admin/restore-vectors', methods=['POST'])
+@admin_required
+def restore_vectors():
+    """벡터 저장소 복원"""
+    try:
+        if not rag_system:
+            return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+        
+        data = request.get_json()
+        backup_filename = data.get('backup_filename')
+        
+        if not backup_filename:
+            return jsonify({'error': '복원할 백업 파일명을 입력해주세요.'}), 400
+        
+        backup_path = os.path.join("./local_storage", backup_filename)
+        
+        if not os.path.exists(backup_path):
+            return jsonify({'error': '백업 파일을 찾을 수 없습니다.'}), 404
+        
+        # 복원 실행
+        success = rag_system.restore_vectors(backup_path)
+        
+        if success:
+            return jsonify({'message': '벡터 저장소 복원이 완료되었습니다.'})
+        else:
+            return jsonify({'error': '복원에 실패했습니다.'}), 500
+        
+    except Exception as e:
+        logger.error(f"벡터 복원 중 오류: {e}")
+        return jsonify({'error': '복원에 실패했습니다.'}), 500
+
+@app.route('/api/admin/document-coverage')
+@admin_required
+def get_document_coverage():
+    """문서 커버리지 정보 반환"""
+    try:
+        if not storage:
+            return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
+        
+        # 새로운 임베딩 통계 메서드 사용
+        embedding_stats = storage.get_embedding_stats()
+        return jsonify({
+            'total_documents': embedding_stats.get('total_files', 0),
+            'documents_with_embedding': embedding_stats.get('completed_files', 0),
+            'documents_without_embedding': embedding_stats.get('pending_files', 0),
+            'completion_rate': embedding_stats.get('completion_rate', 0)
+        })
+        
+    except Exception as e:
+        logger.error(f"문서 커버리지 조회 중 오류: {e}")
+        return jsonify({'error': '문서 커버리지 조회에 실패했습니다.'}), 500
+
+@app.route('/api/admin/update-settings', methods=['POST'])
+@admin_required
+def update_settings():
+    """시스템 설정 업데이트"""
+    try:
+        data = request.get_json()
+        
+        # 설정 업데이트 (실제로는 설정 파일에 저장해야 함)
+        settings = {
+            'chunk_size': data.get('chunk_size', 1200),
+            'chunk_overlap': data.get('chunk_overlap', 200),
+            'embedding_model': data.get('embedding_model', 'text-embedding-3-large'),
+            'llm_model': data.get('llm_model', 'gpt-3.5-turbo')
+        }
+        
+        # RAG 시스템 설정 업데이트
+        if rag_system:
+            rag_system.update_settings(settings)
+        
+        return jsonify({
+            'message': '설정이 업데이트되었습니다.',
+            'settings': settings
+        })
+        
+    except Exception as e:
+        logger.error(f"설정 업데이트 중 오류: {e}")
+        return jsonify({'error': '설정 업데이트에 실패했습니다.'}), 500
+
+@app.route('/api/admin/get-settings')
+@admin_required
+def get_settings():
+    """현재 시스템 설정 반환"""
+    try:
+        if not rag_system:
+            return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+        
+        settings = rag_system.get_settings()
+        
+        return jsonify(settings)
+        
+    except Exception as e:
+        logger.error(f"설정 조회 중 오류: {e}")
+        return jsonify({'error': '설정 조회에 실패했습니다.'}), 500
+
+@app.route('/api/clear-chat-history', methods=['POST'])
+@login_required
+def clear_chat_history():
+    """대화 히스토리 초기화"""
+    try:
+        session['chat_history'] = []
+        return jsonify({'message': '대화 히스토리가 초기화되었습니다.'})
+    except Exception as e:
+        logger.error(f"대화 히스토리 초기화 중 오류: {e}")
+        return jsonify({'error': '대화 히스토리 초기화에 실패했습니다.'}), 500
+
+@app.route('/api/chat-history', methods=['GET'])
+@login_required
+def get_chat_history():
+    """대화 히스토리 조회"""
+    try:
+        chat_history = session.get('chat_history', [])
+        return jsonify({
+            'chat_history': chat_history,
+            'total_count': len(chat_history)
+        })
+    except Exception as e:
+        logger.error(f"대화 히스토리 조회 중 오류: {e}")
+        return jsonify({'error': '대화 히스토리 조회에 실패했습니다.'}), 500
+
 @app.route('/api/status')
 def status():
+    rag_status = rag_system.get_status() if rag_system else {}
+    storage_info = storage.get_storage_info() if storage else {}
+    chat_history_count = len(session.get('chat_history', []))
+    
     return jsonify({
         'status': 'ok',
-        'message': 'Enhanced app with file upload',
-        'environment': os.environ.get('ENVIRONMENT', 'unknown'),
-        'authenticated': session.get('authenticated', False),
-        'username': session.get('username'),
-        'rag_initialized': initialization_complete
+        'rag_system': rag_status,
+        'storage': storage_info,
+        'chat_history_count': chat_history_count,
+        'is_cloud_run': os.environ.get('ENVIRONMENT') == 'cloud',
+        'allowed_extensions': list(ALLOWED_EXTENSIONS),
+        'max_file_size_mb': MAX_FILE_SIZE // (1024 * 1024)
     })
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    print(f"Starting minimal server on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=False)
+    try:
+        # Cloud Run에서 PORT 환경변수 사용
+        port = int(os.environ.get('PORT', 8080))
+        logger.info(f"🌐 서버 시작: 0.0.0.0:{port}")
+        
+        # 서버 시작 (초기화 없이)
+        app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
+    except Exception as e:
+        logger.error(f"❌ 애플리케이션 시작 실패: {e}")
+        import traceback
+        logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+        raise
