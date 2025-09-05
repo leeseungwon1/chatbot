@@ -270,7 +270,7 @@ def upload_file():
                     continue
                 
                 # 파일 업로드
-                file_url = storage.upload_file(file, file.filename)
+                file_url = storage.upload_file(file)
                 uploaded_files.append({
                     'filename': file.filename,
                     'url': file_url

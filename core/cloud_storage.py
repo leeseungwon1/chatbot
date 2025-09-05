@@ -26,11 +26,13 @@ class CloudStorage:
             logger.error(f"❌ Cloud Storage 초기화 실패: {e}")
             raise
     
-    def upload_file(self, file, filename: str) -> str:
+    def upload_file(self, file) -> str:
         """파일을 Cloud Storage에 업로드"""
         try:
+            # 원본 파일명 저장
+            original_filename = file.filename
             # 안전한 파일명 생성
-            secure_name = secure_filename(filename)
+            secure_name = secure_filename(original_filename)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             stored_filename = f"{timestamp}_{secure_name}"
             
@@ -40,7 +42,7 @@ class CloudStorage:
             
             # 메타데이터 저장
             metadata = {
-                'original_name': filename,
+                'original_name': original_filename,
                 'stored_name': stored_filename,
                 'size': blob.size,
                 'uploaded_at': datetime.now().isoformat(),
