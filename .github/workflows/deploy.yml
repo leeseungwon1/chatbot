@@ -33,7 +33,8 @@ jobs:
 
     - name: Authenticate to Google Cloud
       run: |
-        echo "${{ secrets.GCP_SA_KEY }}" | gcloud auth activate-service-account --key-file=-
+        echo "${{ secrets.GCP_SA_KEY }}" > /tmp/gcp-key.json
+        gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
         gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
 
     - name: Configure Docker
