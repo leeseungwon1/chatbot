@@ -379,6 +379,9 @@ def delete_file(filename):
 @admin_required
 def upload_and_embed():
     """파일 업로드 후 즉시 임베딩"""
+    if not ensure_initialization():
+        return jsonify({'error': 'RAG 시스템 초기화에 실패했습니다.'}), 500
+    
     try:
         if not storage:
             logger.error("❌ 스토리지가 초기화되지 않았습니다.")
@@ -476,6 +479,9 @@ def list_files():
 @admin_required
 def batch_delete_files():
     """여러 파일 일괄 삭제"""
+    if not ensure_initialization():
+        return jsonify({'error': 'RAG 시스템 초기화에 실패했습니다.'}), 500
+    
     if not storage:
         return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
     
@@ -633,6 +639,9 @@ def embed_selected_files():
 @app.route('/api/admin/delete-all', methods=['POST'])
 @admin_required
 def delete_all_files():
+    if not ensure_initialization():
+        return jsonify({'error': 'RAG 시스템 초기화에 실패했습니다.'}), 500
+    
     if not storage:
         return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
     
@@ -655,6 +664,9 @@ def delete_all_files():
 @app.route('/api/admin/clear-index', methods=['POST'])
 @admin_required
 def clear_index():
+    if not ensure_initialization():
+        return jsonify({'error': 'RAG 시스템 초기화에 실패했습니다.'}), 500
+    
     if not rag_system:
         return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
     
