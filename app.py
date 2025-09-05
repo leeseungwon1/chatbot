@@ -1004,13 +1004,21 @@ if __name__ == '__main__':
         port = int(os.environ.get('PORT', 8080))
         logger.info(f"🌐 서버 시작: 0.0.0.0:{port}")
         
-        # 서버 시작 후 백그라운드에서 초기화
+        # 서버를 먼저 시작하고 나중에 초기화
         import threading
-        init_thread = threading.Thread(target=initialize_app_async)
+        import time
+        
+        def delayed_init():
+            """5초 후에 초기화 실행"""
+            time.sleep(5)
+            initialize_app_async()
+        
+        init_thread = threading.Thread(target=delayed_init)
         init_thread.daemon = True
         init_thread.start()
         
-        app.run(debug=False, host='0.0.0.0', port=port)
+        # 서버 시작
+        app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
     except Exception as e:
         logger.error(f"❌ 애플리케이션 시작 실패: {e}")
         import traceback
