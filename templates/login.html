@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}로그인 - 육군 군수사령부 업무 도우미{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="login-container">
+        <div class="login-box">
+            <h2>로그인</h2>
+            <form method="POST" class="login-form">
+                <div class="form-group">
+                    <label for="username">사용자명</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">비밀번호</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="role">권한</label>
+                    <select id="role" name="role" required>
+                        <option value="user">일반 사용자</option>
+                        <option value="admin">관리자</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn btn-primary">로그인</button>
+            </form>
+            
+            <div class="login-info">
+                <h4>기본 계정 정보</h4>
+                <p><strong>일반 사용자:</strong> user / user123</p>
+                <p><strong>관리자:</strong> admin / admin123</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

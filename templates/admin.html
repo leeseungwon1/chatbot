@@ -1,0 +1,1269 @@
+{% extends "base.html" %}
+
+{% block title %}관리자 대시보드{% endblock %}
+
+{% block content %}
+<div class="admin-dashboard">
+
+
+    <!-- 메인 콘텐츠 -->
+    <div class="main-content">
+        <!-- 상단 정보 카드들 -->
+        <div class="info-cards">
+            <div class="info-card system-status">
+                <div class="card-header">
+                    <h3><i class="fas fa-server"></i> 시스템 상태</h3>
+                </div>
+                <div class="card-content">
+                    <div class="status-item">
+                        <span class="label">CPU</span>
+                        <span class="value" id="cpuPercent">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">메모리</span>
+                        <span class="value" id="memoryPercent">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">API 응답</span>
+                        <span class="value" id="apiResponseTime">-</span>
+                    </div>
+                    <button class="btn-refresh" onclick="refreshSystemStatus()">
+                        <i class="fas fa-sync-alt"></i> 새로고침
+                    </button>
+                </div>
+            </div>
+
+            <div class="info-card document-status">
+                <div class="card-header">
+                    <h3><i class="fas fa-file-alt"></i> 문서 현황</h3>
+                </div>
+                <div class="card-content">
+                    <div class="status-item">
+                        <span class="label">총 파일</span>
+                        <span class="value" id="totalFiles">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">임베딩 완료</span>
+                        <span class="value" id="completedFiles">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">임베딩 대기</span>
+                        <span class="value" id="pendingFiles">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-card vector-db">
+                <div class="card-header">
+                    <h3><i class="fas fa-database"></i> 벡터 DB</h3>
+                </div>
+                <div class="card-content">
+                    <div class="status-item">
+                        <span class="label">총 벡터</span>
+                        <span class="value" id="totalVectors">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">차원</span>
+                        <span class="value" id="dimensions">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="label">DB 크기</span>
+                        <span class="value" id="dbSize">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 하단 작업 영역 -->
+        <div class="work-area">
+            <!-- 좌측: 파일 업로드 -->
+            <div class="upload-section">
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="file-drop-zone" id="fileDropZone">
+                        <div class="drop-zone-content">
+                            <i class="fas fa-cloud-upload-alt fa-3x text-muted"></i>
+                            <h4>파일을 여기에 드래그하거나 클릭하여 선택</h4>
+                            <p>여러 파일을 동시에 선택할 수 있습니다 (최대 50MB)</p>
+                            <input type="file" id="files" name="files[]" multiple accept=".pdf,.docx,.doc,.txt,.md" required>
+                            <button type="button" class="btn-select-files">파일 선택</button>
+                        </div>
+                    </div>
+                    
+                    <div class="selected-files" id="selectedFiles" style="display: none;">
+                        <h5>선택된 파일:</h5>
+                        <div class="file-list" id="fileList"></div>
+                    </div>
+                    
+                    <button type="button" class="btn-upload" id="uploadBtn" onclick="uploadAndEmbed()">
+                        <i class="fas fa-arrow-up"></i> <span id="uploadBtnText">파일 업로드</span>
+                    </button>
+                </form>
+                
+                <!-- 업로드 진행률 -->
+                <div id="uploadProgress" class="upload-progress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p id="uploadStatus">업로드 준비 중...</p>
+                    <p id="uploadPercentage">0%</p>
+                </div>
+            </div>
+
+            <!-- 우측: 파일 관리 -->
+            <div class="files-section">
+                <h3><i class="fas fa-folder-open"></i> 업로드된 파일</h3>
+                <div class="files-actions">
+                    <button class="btn-action" onclick="selectAllFiles()">
+                        <i class="fas fa-check-square"></i> 전체 선택
+                    </button>
+                    <button class="btn-action" onclick="embedSelectedFiles()">
+                        <i class="fas fa-magic"></i> 선택 임베딩
+                    </button>
+                    <button class="btn-action" onclick="embedAllFiles()">
+                        <i class="fas fa-sync-alt"></i> 전체 임베딩
+                    </button>
+                    <button class="btn-action danger" onclick="deleteSelectedFiles()">
+                        <i class="fas fa-trash"></i> 선택 삭제
+                    </button>
+                </div>
+                
+                <div class="files-table">
+                    <div id="filesTableContent">
+                        <div class="loading-state">
+                            <i class="fas fa-spinner fa-spin fa-2x"></i>
+                            <p>파일 목록을 불러오는 중...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 모달 -->
+<div class="modal" id="confirmModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h4>확인</h4>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body" id="confirmModalBody"></div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeModal()">취소</button>
+            <button class="btn-primary" id="confirmModalConfirm">확인</button>
+        </div>
+    </div>
+</div>
+
+<!-- 알림 토스트 -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// 전역 변수
+let selectedFiles = [];
+
+// 페이지 로드 시 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    initializeFileUpload();
+    loadDashboardData();
+    loadFilesList();
+});
+
+// 대시보드 데이터 로드
+function loadDashboardData() {
+    refreshSystemStatus();
+    refreshDocumentStatus();
+    refreshVectorDBInfo();
+}
+
+// 시스템 상태 새로고침
+function refreshSystemStatus() {
+    fetch('/api/admin/system-status')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                showNotification(data.error, 'error');
+                return;
+            }
+            
+            document.getElementById('cpuPercent').textContent = data.system.cpu_percent + '%';
+            document.getElementById('memoryPercent').textContent = data.system.memory_percent + '%';
+            document.getElementById('apiResponseTime').textContent = data.system.api_response_time_ms + 'ms';
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showNotification('시스템 상태 조회에 실패했습니다.', 'error');
+        });
+}
+
+// 문서 현황 새로고침
+function refreshDocumentStatus() {
+    fetch('/api/admin/document-coverage')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                showNotification(data.error, 'error');
+                return;
+            }
+            
+            document.getElementById('totalFiles').textContent = data.total_documents;
+            document.getElementById('completedFiles').textContent = data.documents_with_embedding;
+            document.getElementById('pendingFiles').textContent = data.documents_without_embedding;
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showNotification('문서 현황 조회에 실패했습니다.', 'error');
+        });
+}
+
+// 벡터 DB 정보 새로고침
+function refreshVectorDBInfo() {
+    fetch('/api/status')
+        .then(response => response.json())
+        .then(data => {
+            if (data.rag_system) {
+                document.getElementById('totalVectors').textContent = data.rag_system.total_embeddings || 0;
+                document.getElementById('dimensions').textContent = data.rag_system.total_embeddings > 0 ? '1536' : '-';
+                document.getElementById('dbSize').textContent = '계산 중...';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showNotification('벡터 DB 정보 조회에 실패했습니다.', 'error');
+        });
+}
+
+// 파일 업로드 초기화
+function initializeFileUpload() {
+    const fileInput = document.getElementById('files');
+    const dropZone = document.getElementById('fileDropZone');
+    const selectBtn = document.querySelector('.btn-select-files');
+    
+    selectBtn.addEventListener('click', () => fileInput.click());
+    
+    // 파일 선택 시
+    fileInput.addEventListener('change', handleFileSelection);
+    
+    // 드래그 앤 드롭
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        fileInput.files = e.dataTransfer.files;
+        handleFileSelection();
+    });
+}
+
+// 파일 선택 처리
+function handleFileSelection() {
+    updateSelectedFilesDisplay();
+}
+
+// 파일 업로드 + 임베딩
+function uploadAndEmbed() {
+    console.log('🚀 파일 업로드 시작...');
+    
+    const formData = new FormData();
+    const fileInput = document.getElementById('files');
+    
+    if (!fileInput) {
+        console.error('❌ 파일 입력 요소를 찾을 수 없습니다.');
+        showNotification('파일 입력 요소를 찾을 수 없습니다.', 'error');
+        return;
+    }
+    
+    if (fileInput.files.length === 0) {
+        console.log('⚠️ 선택된 파일이 없습니다.');
+        showNotification('파일을 선택해주세요.', 'warning');
+        return;
+    }
+    
+    console.log(`📁 ${fileInput.files.length}개 파일 선택됨`);
+    
+    for (let file of fileInput.files) {
+        console.log(`📄 파일 추가: ${file.name} (${file.size} bytes)`);
+        formData.append('files[]', file);
+    }
+    
+    showUploadProgress();
+    
+    // 진행률 시뮬레이션 (실제로는 서버에서 받아야 함)
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+        progress += Math.random() * 15;
+        if (progress > 90) progress = 90;
+        updateUploadProgress(Math.round(progress));
+    }, 200);
+    
+    fetch('/api/upload-and-embed', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        console.log('📡 업로드 API 응답 상태:', response.status);
+        clearInterval(progressInterval);
+        updateUploadProgress(100);
+        return response.json();
+    })
+    .then(data => {
+        console.log('📊 업로드 API 응답 데이터:', data);
+        setTimeout(() => hideUploadProgress(), 500);
+        
+        if (data.error) {
+            console.error('❌ 업로드 오류:', data.error);
+            showNotification(data.error, 'error');
+        } else {
+            console.log('✅ 업로드 성공:', data.message);
+            showNotification(data.message, 'success');
+            
+            // 폼 초기화
+            document.getElementById('uploadForm').reset();
+            document.getElementById('selectedFiles').style.display = 'none';
+            
+                                // 즉시 파일 목록과 대시보드 새로고침
+            console.log('⏳ 파일 목록과 대시보드 새로고침...');
+            loadFilesList();
+            loadDashboardData();
+        }
+    })
+    .catch(error => {
+        console.error('❌ 업로드 중 예외 발생:', error);
+        hideUploadProgress();
+        showNotification('파일 업로드 및 임베딩 중 오류가 발생했습니다.', 'error');
+    });
+}
+
+// 파일 목록 로드
+function loadFilesList() {
+    console.log('🔄 파일 목록 로드 시작...');
+    
+    fetch('/api/files')
+        .then(response => {
+            console.log('📡 API 응답 상태:', response.status);
+            return response.json();
+        })
+        .then(data => {
+            console.log('📊 받은 데이터:', data);
+            
+            if (data.error) {
+                console.error('❌ API 오류:', data.error);
+                showNotification(data.error, 'error');
+                return;
+            }
+            
+            const filesTableContent = document.getElementById('filesTableContent');
+            if (!filesTableContent) {
+                console.error('❌ filesTableContent 요소를 찾을 수 없습니다.');
+                return;
+            }
+            
+            if (data.files && Array.isArray(data.files) && data.files.length > 0) {
+                console.log(`📁 ${data.files.length}개 파일 발견`);
+                
+                const table = document.createElement('table');
+                table.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th width="50">
+                                <input type="checkbox" id="selectAll" onchange="toggleSelectAll()">
+                            </th>
+                            <th>파일명</th>
+                            <th>크기</th>
+                            <th>업로드 일시</th>
+                            <th>임베딩 상태</th>
+                        </tr>
+                    </thead>
+                    <tbody id="filesTableBody">
+                    </tbody>
+                `;
+                
+                const tbody = table.querySelector('#filesTableBody');
+                data.files.forEach((file, index) => {
+                    console.log(`📄 파일 ${index + 1}:`, file);
+                    
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>
+                            <input type="checkbox" class="file-checkbox" value="${file.filename || ''}">
+                        </td>
+                        <td>
+                            <div class="file-info">
+                                <i class="fas fa-file-pdf text-danger" 
+                                   style="display: ${file.content_type === 'application/pdf' ? 'inline' : 'none'}"></i>
+                                <i class="fas fa-file-word text-primary" 
+                                   style="display: ${file.content_type && file.content_type.includes('word') ? 'inline' : 'none'}"></i>
+                                <i class="fas fa-file-alt text-success" 
+                                   style="display: ${file.content_type === 'text/plain' ? 'inline' : 'none'}"></i>
+                                <span class="file-name">${file.name || file.filename || '알 수 없음'}</span>
+                            </div>
+                        </td>
+                        <td>${file.size_mb || '0'} MB</td>
+                        <td>${formatDateTime(file.created) || '-'}</td>
+                        <td>
+                            ${file.has_embedding ? 
+                                '<span class="status-badge success"><i class="fas fa-check"></i> 완료</span>' : 
+                                '<span class="status-badge warning"><i class="fas fa-clock"></i> 대기</span>'
+                            }
+                        </td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                
+                filesTableContent.innerHTML = '';
+                filesTableContent.appendChild(table);
+                
+                // 체크박스 이벤트 다시 바인딩
+                bindCheckboxEvents();
+                console.log('✅ 파일 목록 테이블 생성 완료');
+            } else {
+                console.log('📭 파일이 없습니다');
+                filesTableContent.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-folder-open fa-3x"></i>
+                        <h4>업로드된 파일이 없습니다</h4>
+                        <p>위의 업로드 영역에서 파일을 선택하여 시작하세요.</p>
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('❌ 파일 목록 로드 실패:', error);
+            showNotification('파일 목록을 불러오는데 실패했습니다.', 'error');
+        });
+}
+
+// 선택된 파일들을 파일선택 박스에 표시
+function updateSelectedFilesDisplay() {
+    const selectedFilesDiv = document.getElementById('selectedFiles');
+    const fileList = document.getElementById('fileList');
+    
+    // 좌측 업로드 영역의 파일 선택 상태만 확인
+    const uploadFileInput = document.getElementById('files');
+    const hasUploadFiles = uploadFileInput && uploadFileInput.files.length > 0;
+    
+    if (hasUploadFiles) {
+        // 업로드할 파일이 선택된 경우에만 표시
+        selectedFilesDiv.style.display = 'block';
+        fileList.innerHTML = '';
+        
+        // 업로드할 파일들만 표시
+        for (let file of uploadFileInput.files) {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item';
+            fileItem.innerHTML = `
+                <i class="fas fa-file"></i>
+                <span>${file.name}</span>
+                <small>업로드 예정</small>
+            `;
+            fileList.appendChild(fileItem);
+        }
+    } else {
+        // 업로드할 파일이 없으면 섹션 숨김
+        selectedFilesDiv.style.display = 'none';
+    }
+}
+
+// 체크박스 이벤트 바인딩
+function bindCheckboxEvents() {
+    const checkboxes = document.querySelectorAll('.file-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', handleCheckboxChange);
+    });
+}
+
+// 체크박스 변경 처리
+function handleCheckboxChange(e) {
+    if (e.target.checked) {
+        if (!selectedFiles.includes(e.target.value)) {
+            selectedFiles.push(e.target.value);
+        }
+    } else {
+        selectedFiles = selectedFiles.filter(f => f !== e.target.value);
+    }
+    updateSelectedCount();
+    
+    // selectAll 체크박스 상태 업데이트
+    const allCheckboxes = document.querySelectorAll('.file-checkbox');
+    const checkedCheckboxes = document.querySelectorAll('.file-checkbox:checked');
+    document.getElementById('selectAll').checked = allCheckboxes.length === checkedCheckboxes.length;
+}
+
+// 파일 선택 관련 함수들
+function selectAllFiles() {
+    const checkboxes = document.querySelectorAll('.file-checkbox');
+    selectedFiles = [];
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = true;
+        selectedFiles.push(checkbox.value);
+    });
+    document.getElementById('selectAll').checked = true;
+    updateSelectedCount();
+}
+
+function toggleSelectAll() {
+    const selectAll = document.getElementById('selectAll');
+    const checkboxes = document.querySelectorAll('.file-checkbox');
+    
+    if (selectAll.checked) {
+        selectedFiles = [];
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = true;
+            selectedFiles.push(checkbox.value);
+        });
+    } else {
+        checkboxes.forEach(checkbox => {
+            checkbox.checked = false;
+        });
+        selectedFiles = [];
+    }
+    updateSelectedCount();
+}
+
+function updateSelectedCount() {
+    const count = selectedFiles.length;
+    if (count > 0) {
+        showNotification(`${count}개 파일이 선택되었습니다.`, 'info');
+    }
+}
+
+// 선택된 파일 삭제
+function deleteSelectedFiles() {
+    if (selectedFiles.length === 0) {
+        showNotification('삭제할 파일을 선택해주세요.', 'warning');
+        return;
+    }
+    
+    showConfirmModal(
+        `선택된 ${selectedFiles.length}개 파일을 삭제하시겠습니까?`,
+        () => {
+            fetch('/api/files/batch-delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ filenames: selectedFiles })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    showNotification(data.error, 'error');
+                } else {
+                    showNotification(data.message, 'success');
+                    selectedFiles = [];
+                    // 파일 목록 새로고침
+                    loadFilesList();
+                    loadDashboardData();
+                }
+            })
+            .catch(error => {
+                showNotification('파일 삭제 중 오류가 발생했습니다.', 'error');
+                console.error('Error:', error);
+            });
+        }
+    );
+}
+
+// 선택된 파일들 임베딩
+function embedSelectedFiles() {
+    if (selectedFiles.length === 0) {
+        showNotification('임베딩할 파일을 선택해주세요.', 'warning');
+        return;
+    }
+    
+    showConfirmModal(
+        `선택된 ${selectedFiles.length}개 파일을 임베딩하시겠습니까?`,
+        () => {
+            showNotification('선택된 파일들의 임베딩을 시작합니다...', 'info');
+            
+            fetch('/api/admin/embed-selected', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ filenames: selectedFiles })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    showNotification(data.error, 'error');
+                } else {
+                    showNotification(`선택된 ${data.embedded_count || selectedFiles.length}개 파일의 임베딩이 완료되었습니다.`, 'success');
+                    selectedFiles = [];
+                    // 파일 목록과 대시보드 새로고침
+                    setTimeout(() => {
+                        loadFilesList();
+                        loadDashboardData();
+                    }, 1000);
+                }
+            })
+            .catch(error => {
+                showNotification('임베딩 중 오류가 발생했습니다.', 'error');
+                console.error('Error:', error);
+            });
+        }
+    );
+}
+
+// 모든 파일 전체 임베딩 (선택 불필요)
+function embedAllFiles() {
+    showConfirmModal(
+        '모든 파일에 대해 전체 임베딩을 실행하시겠습니까?',
+        () => {
+            showNotification('전체 임베딩을 시작합니다...', 'info');
+            
+            fetch('/api/admin/rebuild', { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    showNotification(data.error, 'error');
+                } else {
+                    showNotification('전체 임베딩이 완료되었습니다.', 'success');
+                    // 파일 목록과 대시보드 새로고침
+                    setTimeout(() => {
+                        loadFilesList();
+                        loadDashboardData();
+                    }, 1000);
+                }
+            })
+            .catch(error => {
+                showNotification('전체 임베딩 중 오류가 발생했습니다.', 'error');
+                console.error('Error:', error);
+                // 오류가 발생해도 파일 목록은 새로고침
+                    loadFilesList();
+                    loadDashboardData();
+            });
+        }
+    );
+}
+
+// 업로드 진행률 표시
+function showUploadProgress() {
+    document.getElementById('uploadProgress').style.display = 'block';
+    document.getElementById('uploadStatus').textContent = '업로드 중...';
+    document.getElementById('uploadPercentage').textContent = '0%';
+    document.getElementById('progressFill').style.width = '0%';
+}
+
+function hideUploadProgress() {
+    document.getElementById('uploadProgress').style.display = 'none';
+}
+
+function updateUploadProgress(percentage) {
+    document.getElementById('uploadPercentage').textContent = `${percentage}%`;
+    document.getElementById('progressFill').style.width = `${percentage}%`;
+}
+
+// 날짜 시간 포맷팅
+function formatDateTime(dateTimeString) {
+    if (!dateTimeString) return '-';
+    
+    try {
+        const date = new Date(dateTimeString);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        
+        return `${year}-${month}-${day} ${hours}:${minutes}`;
+    } catch (e) {
+        return dateTimeString;
+    }
+}
+
+// 유틸리티 함수들
+function showConfirmModal(message, onConfirm) {
+    document.getElementById('confirmModalBody').textContent = message;
+    document.getElementById('confirmModalConfirm').onclick = () => {
+        onConfirm();
+        closeModal();
+    };
+    document.getElementById('confirmModal').style.display = 'block';
+}
+
+function closeModal() {
+    document.getElementById('confirmModal').style.display = 'none';
+}
+
+function showNotification(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `
+        <div class="toast-content">
+            <i class="fas fa-${getIconForType(type)}"></i>
+            <span>${message}</span>
+        </div>
+        <button class="toast-close" onclick="this.parentElement.remove()">&times;</button>
+    `;
+    
+    document.getElementById('toastContainer').appendChild(toast);
+    
+    // 3초 후 자동 제거
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.remove();
+        }
+    }, 3000);
+}
+
+function getIconForType(type) {
+    switch(type) {
+        case 'success': return 'check-circle';
+        case 'error': return 'exclamation-circle';
+        case 'warning': return 'exclamation-triangle';
+        default: return 'info-circle';
+    }
+}
+
+// 모달 외부 클릭 시 닫기
+window.onclick = function(event) {
+    const modal = document.getElementById('confirmModal');
+    if (event.target === modal) {
+        closeModal();
+    }
+}
+</script>
+
+<style>
+/* 전체 레이아웃 */
+.admin-dashboard {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    padding: 20px;
+}
+
+
+
+/* 정보 카드들 */
+.info-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.info-card {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 15px;
+    padding: 25px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s ease;
+}
+
+.info-card:hover {
+    transform: translateY(-5px);
+}
+
+.card-header h3 {
+    margin: 0 0 20px 0;
+    color: #333;
+    font-size: 1.3rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.status-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.status-item:last-child {
+    border-bottom: none;
+}
+
+.label {
+    font-weight: 600;
+    color: #666;
+}
+
+.value {
+    font-weight: 700;
+    color: #333;
+    font-size: 1.1rem;
+}
+
+.btn-refresh {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background 0.3s ease;
+}
+
+.btn-refresh:hover {
+    background: #0056b3;
+}
+
+/* 작업 영역 */
+.work-area {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 30px;
+}
+
+.upload-section, .files-section {
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 15px;
+    padding: 25px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.files-section h3 {
+    margin: 0 0 15px 0;
+    color: #333;
+    font-size: 1.4rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* 파일 드롭 영역 */
+.file-drop-zone {
+    border: 2px dashed #ddd;
+    border-radius: 10px;
+    padding: 80px 40px;
+    text-align: center;
+    margin-bottom: 20px;
+    transition: all 0.3s ease;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 0;
+}
+
+.file-drop-zone:hover, .file-drop-zone.dragover {
+    border-color: #007bff;
+    background: rgba(0, 123, 255, 0.05);
+}
+
+.drop-zone-content h4 {
+    margin: 15px 0 10px 0;
+    color: #333;
+}
+
+.drop-zone-content p {
+    color: #666;
+    margin-bottom: 20px;
+}
+
+.btn-select-files {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+.btn-select-files:hover {
+    background: #0056b3;
+    transform: translateY(-2px);
+}
+
+/* 선택된 파일 */
+.selected-files {
+    margin: 20px 0;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.selected-files h5 {
+    margin: 0 0 10px 0;
+    color: #333;
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: white;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    border: 1px solid #e9ecef;
+}
+
+.file-item i {
+    color: #007bff;
+}
+
+.file-item span {
+    font-weight: 500;
+    color: #333;
+}
+
+.file-item small {
+    color: #666;
+    font-size: 0.85rem;
+}
+
+/* 업로드 버튼 */
+.btn-upload {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 15px 30px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    font-weight: 600;
+    width: 100%;
+    transition: all 0.3s ease;
+}
+
+.btn-upload:hover {
+    background: #218838;
+    transform: translateY(-2px);
+}
+
+/* 파일 액션 버튼들 */
+.files-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.btn-action {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+}
+
+.btn-action:hover {
+    transform: translateY(-2px);
+}
+
+.btn-action.danger {
+    background: #dc3545;
+}
+
+.btn-action.danger:hover {
+    background: #c82333;
+}
+
+/* 파일 테이블 */
+.files-table {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+thead {
+    background: #f8f9fa;
+}
+
+th, td {
+    padding: 12px 15px;
+    text-align: left;
+    border-bottom: 1px solid #e9ecef;
+}
+
+th {
+    font-weight: 600;
+    color: #333;
+    background: #f8f9fa;
+}
+
+td {
+    color: #666;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.file-name {
+    font-weight: 500;
+    color: #333;
+}
+
+/* 상태 배지 */
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.status-badge.success {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-badge.warning {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.status-badge.error {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* 빈 상태 */
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: #666;
+}
+
+.empty-state i {
+    color: #ddd;
+    margin-bottom: 15px;
+}
+
+.empty-state h4 {
+    margin: 15px 0 10px 0;
+    color: #333;
+}
+
+/* 로딩 상태 */
+.loading-state {
+    text-align: center;
+    padding: 40px;
+    color: #666;
+}
+
+.loading-state i {
+    color: #007bff;
+    margin-bottom: 15px;
+}
+
+/* 진행률 바 */
+.upload-progress {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #007bff;
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+#uploadPercentage {
+    text-align: center;
+    font-weight: 600;
+    color: #007bff;
+    margin-top: 5px;
+}
+
+/* 모달 */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    background-color: white;
+    margin: 15% auto;
+    padding: 0;
+    border-radius: 10px;
+    width: 90%;
+    max-width: 500px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.modal-header {
+    padding: 20px;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h4 {
+    margin: 0;
+    color: #333;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #666;
+}
+
+.modal-body {
+    padding: 20px;
+    color: #666;
+    line-height: 1.5;
+}
+
+.modal-footer {
+    padding: 20px;
+    border-top: 1px solid #e9ecef;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+/* 토스트 알림 */
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1001;
+}
+
+.toast {
+    background: white;
+    border-radius: 8px;
+    padding: 15px 20px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 300px;
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+.toast-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.toast-close {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #666;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.toast-success {
+    border-left: 4px solid #28a745;
+}
+
+.toast-error {
+    border-left: 4px solid #dc3545;
+}
+
+.toast-warning {
+    border-left: 4px solid #ffc107;
+}
+
+.toast-info {
+    border-left: 4px solid #17a2b8;
+}
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+    .work-area {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    
+    .info-cards {
+        grid-template-columns: 1fr;
+    }
+    
+    .dashboard-header {
+        flex-direction: column;
+        gap: 15px;
+        text-align: center;
+    }
+    
+    .files-actions {
+        flex-direction: column;
+    }
+    
+    .btn-action {
+        width: 100%;
+    }
+}
+</style>
+{% endblock %}
