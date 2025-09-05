@@ -28,13 +28,14 @@ jobs:
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v2
       with:
-        service_account_key: ${{ secrets.GCP_SA_KEY }}
         project_id: ${{ secrets.GCP_PROJECT_ID }}
 
     - name: Authenticate to Google Cloud
       run: |
-        echo "${{ secrets.GCP_SA_KEY }}" | sed 's/\\n/\n/g' | sed 's/type: /"type": "/g' | sed 's/project_id: /"project_id": "/g' | sed 's/private_key_id: /"private_key_id": "/g' | sed 's/private_key: /"private_key": "/g' | sed 's/client_email: /"client_email": "/g' | sed 's/client_id: /"client_id": "/g' | sed 's/auth_uri: /"auth_uri": "/g' | sed 's/token_uri: /"token_uri": "/g' | sed 's/auth_provider_x509_cert_url: /"auth_provider_x509_cert_url": "/g' | sed 's/client_x509_cert_url: /"client_x509_cert_url": "/g' | sed 's/universe_domain: /"universe_domain": "/g' | sed 's/,$/",/g' | sed 's/armychatbottest,/armychatbottest",/g' | sed 's/github-actions-sa@armychatbottest.iam.gserviceaccount.com,/github-actions-sa@armychatbottest.iam.gserviceaccount.com",/g' | sed 's/115444956060618440159,/115444956060618440159",/g' | sed 's/https:\/\/accounts.google.com\/o\/oauth2\/auth,/https:\/\/accounts.google.com\/o\/oauth2\/auth",/g' | sed 's/https:\/\/oauth2.googleapis.com\/token,/https:\/\/oauth2.googleapis.com\/token",/g' | sed 's/https:\/\/www.googleapis.com\/oauth2\/v1\/certs,/https:\/\/www.googleapis.com\/oauth2\/v1\/certs",/g' | sed 's/https:\/\/www.googleapis.com\/robot\/v1\/metadata\/x509\/github-actions-sa%40armychatbottest.iam.gserviceaccount.com,/https:\/\/www.googleapis.com\/robot\/v1\/metadata\/x509\/github-actions-sa%40armychatbottest.iam.gserviceaccount.com",/g' | sed 's/googleapis.com,/googleapis.com",/g' | sed 's/-----BEGIN PRIVATE KEY-----n/-----BEGIN PRIVATE KEY-----\\n/g' | sed 's/-----END PRIVATE KEY-----n/-----END PRIVATE KEY-----\\n/g' > /tmp/gcp-key.json
-        cat /tmp/gcp-key.json | head -5
+        # JSON을 안전하게 처리하기 위해 printf 사용
+        printf '%s\n' '${{ secrets.GCP_SA_KEY }}' > /tmp/gcp-key.json
+        # JSON 유효성 검사
+        python3 -m json.tool /tmp/gcp-key.json > /dev/null
         gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
         gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
 
@@ -64,3 +65,8 @@ jobs:
       run: |
         SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.url)')
         echo "Service deployed at: $SERVICE_URL"
+
+    - name: Cleanup
+      if: always()
+      run: |
+        rm -f /tmp/gcp-key.json
