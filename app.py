@@ -69,21 +69,29 @@ def ensure_initialization():
     try:
         logger.info("🚀 지연 초기화 시작...")
         
-        # 환경에 따른 스토리지 선택
-        if IS_CLOUD_RUN:
-            logger.info("☁️ Cloud Run 환경에서 Cloud Storage 초기화 중...")
+        # 환경 변수 확인
+        is_cloud_run = os.environ.get('ENVIRONMENT') == 'cloud'
+        gcp_project_id = os.environ.get('GCP_PROJECT_ID')
+        gcs_bucket_name = os.environ.get('GCS_BUCKET_NAME')
+        
+        logger.info(f"환경: {'Cloud Run' if is_cloud_run else 'Local'}")
+        logger.info(f"프로젝트 ID: {gcp_project_id}")
+        logger.info(f"버킷 이름: {gcs_bucket_name}")
+        
+        if is_cloud_run and gcp_project_id and gcs_bucket_name:
+            # Cloud Storage 초기화
             storage = CloudStorage(
-                bucket_name=GCS_BUCKET_NAME,
-                project_id=GCP_PROJECT_ID,
-                is_cloud_run=IS_CLOUD_RUN
+                bucket_name=gcs_bucket_name,
+                project_id=gcp_project_id,
+                is_cloud_run=True
             )
             logger.info("✅ Cloud Storage 초기화 완료")
         else:
-            logger.info("💾 로컬 환경에서 Local Storage 초기화 중...")
+            # 로컬 스토리지 초기화
             storage = LocalStorage(
-                bucket_name=GCS_BUCKET_NAME,
-                project_id=GCP_PROJECT_ID,
-                is_cloud_run=IS_CLOUD_RUN
+                bucket_name=gcs_bucket_name or 'local-bucket',
+                project_id=gcp_project_id or 'local-project',
+                is_cloud_run=False
             )
             logger.info("✅ 로컬 스토리지 초기화 완료")
         

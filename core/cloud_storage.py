@@ -148,6 +148,85 @@ class CloudStorage:
             logger.error(f"❌ 파일 삭제 실패: {e}")
             return False
     
+    def list_files(self) -> List[Dict[str, Any]]:
+        """파일 목록 조회"""
+        try:
+            files = []
+            metadata = self.get_metadata()
+            
+            for filename, file_metadata in metadata.items():
+                files.append({
+                    'name': filename,
+                    'filename': file_metadata.get('original_name', filename),
+                    'size': file_metadata.get('size', 0),
+                    'uploaded_at': file_metadata.get('uploaded_at', ''),
+                    'has_embedding': file_metadata.get('has_embedding', False),
+                    'url': f"gs://{self.bucket_name}/documents/{filename}",
+                    'content_type': file_metadata.get('content_type', '')
+                })
+            
+            # 업로드 시간순으로 정렬
+            files.sort(key=lambda x: x.get('uploaded_at', ''), reverse=True)
+            
+            logger.info(f"✅ 파일 목록 조회 완료: {len(files)}개 파일")
+            return files
+            
+        except Exception as e:
+            logger.error(f"❌ 파일 목록 조회 실패: {e}")
+            return []
+    
+    def delete_multiple_files(self, filenames: List[str]) -> Dict[str, bool]:
+        """여러 파일 일괄 삭제"""
+        results = {}
+        for filename in filenames:
+            results[filename] = self.delete_file(filename)
+        return results
+    
+    def delete_all_files(self) -> bool:
+        """모든 파일 삭제"""
+        try:
+            # 문서 파일들 삭제
+            doc_blobs = list(self.bucket.list_blobs(prefix="documents/"))
+            for blob in doc_blobs:
+                blob.delete()
+            
+            # 메타데이터 파일들 삭제
+            metadata_blobs = list(self.bucket.list_blobs(prefix="metadata/"))
+            for blob in metadata_blobs:
+                blob.delete()
+            
+            logger.info(f"✅ 모든 파일 삭제 완료: {len(doc_blobs)}개 문서, {len(metadata_blobs)}개 메타데이터")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 전체 파일 삭제 실패: {e}")
+            return False
+    
+    def get_embedding_stats(self) -> Dict[str, Any]:
+        """임베딩 통계 조회"""
+        try:
+            metadata = self.get_metadata()
+            total_files = len(metadata)
+            completed_files = sum(1 for m in metadata.values() if m.get('has_embedding', False))
+            pending_files = total_files - completed_files
+            completion_rate = (completed_files / total_files * 100) if total_files > 0 else 0
+            
+            return {
+                'total_files': total_files,
+                'completed_files': completed_files,
+                'pending_files': pending_files,
+                'completion_rate': round(completion_rate, 2)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 임베딩 통계 조회 실패: {e}")
+            return {
+                'total_files': 0,
+                'completed_files': 0,
+                'pending_files': 0,
+                'completion_rate': 0
+            }
+    
     def get_storage_info(self) -> Dict[str, Any]:
         """저장소 정보 조회"""
         try:
