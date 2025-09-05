@@ -64,7 +64,10 @@ def ensure_initialization():
     """필요할 때만 RAG 시스템 초기화"""
     global rag_system, storage, initialization_complete
     
+    logger.info(f"🔍 초기화 상태 확인: initialization_complete={initialization_complete}")
+    
     if initialization_complete:
+        logger.info("✅ 이미 초기화 완료됨")
         return True
     
     try:
@@ -80,6 +83,7 @@ def ensure_initialization():
         logger.info(f"버킷 이름: {gcs_bucket_name}")
         
         if is_cloud_run and gcp_project_id and gcs_bucket_name:
+            logger.info("📦 Cloud Storage 초기화 시작...")
             # Cloud Storage 초기화
             from core.cloud_storage import CloudStorage
             storage = CloudStorage(
@@ -89,6 +93,7 @@ def ensure_initialization():
             )
             logger.info("✅ Cloud Storage 초기화 완료")
         else:
+            logger.info("📁 로컬 스토리지 초기화 시작...")
             # 로컬 스토리지 초기화
             from core.storage import LocalStorage
             storage = LocalStorage(
@@ -99,11 +104,13 @@ def ensure_initialization():
             logger.info("✅ 로컬 스토리지 초기화 완료")
         
         # RAG 시스템 초기화
+        logger.info("🤖 RAG 시스템 초기화 시작...")
         from core.rag import RAGSystem
         rag_system = RAGSystem(storage=storage)
         logger.info("✅ RAG 시스템 초기화 완료")
         
         # RAG 시스템에서 자동으로 기존 파일들을 임베딩 처리함
+        logger.info("📄 기존 파일 자동 임베딩 처리 중...")
         
         initialization_complete = True
         logger.info("✅ 전체 초기화 완료")
