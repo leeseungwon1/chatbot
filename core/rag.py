@@ -53,29 +53,31 @@ class RAGSystem:
                             self.vector_store = data.get('vector_store', {})
                             logger.info(f"✅ Cloud Storage에서 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩")
                             
-                            # 벡터 저장소가 비어있지만 스토리지에 파일이 있는 경우 자동 임베딩
-                            if len(self.documents) == 0 and self.storage:
-                                logger.info("🔍 벡터 저장소가 비어있습니다. 기존 파일들을 확인합니다...")
-                                try:
-                                    files = self.storage.list_files()
-                                    logger.info(f"📁 스토리지에서 {len(files)}개 파일 발견")
-                                    
-                                    for file_info in files:
-                                        try:
-                                            file_url = file_info.get('url')
-                                            original_name = file_info.get('filename')
-                                            
-                                            if file_url and original_name:
-                                                logger.info(f"📄 자동 임베딩 시작: {original_name}")
-                                                success = self.add_document(file_url, original_name)
-                                                if success:
-                                                    logger.info(f"✅ 자동 임베딩 완료: {original_name}")
-                                                else:
-                                                    logger.error(f"❌ 자동 임베딩 실패: {original_name}")
-                                        except Exception as e:
-                                            logger.error(f"❌ 자동 임베딩 중 오류: {file_info.get('filename', 'unknown')} - {e}")
-                                except Exception as e:
-                                    logger.error(f"❌ 기존 파일 확인 중 오류: {e}")
+                            # 벡터 저장소가 비어있거나 스토리지에 파일이 더 많은 경우 자동 임베딩
+                            if self.storage:
+                                files = self.storage.list_files()
+                                logger.info(f"📁 스토리지에서 {len(files)}개 파일 발견")
+                                
+                                # 벡터 저장소의 문서 수와 스토리지의 파일 수 비교
+                                if len(self.documents) == 0 or len(self.documents) < len(files):
+                                    logger.info("🔍 벡터 저장소가 비어있거나 불완전합니다. 기존 파일들을 확인합니다...")
+                                    try:
+                                        for file_info in files:
+                                            try:
+                                                file_url = file_info.get('url')
+                                                original_name = file_info.get('name')  # 원본 파일명
+                                                
+                                                if file_url and original_name:
+                                                    logger.info(f"📄 자동 임베딩 시작: {original_name}")
+                                                    success = self.add_document(file_url, original_name)
+                                                    if success:
+                                                        logger.info(f"✅ 자동 임베딩 완료: {original_name}")
+                                                    else:
+                                                        logger.error(f"❌ 자동 임베딩 실패: {original_name}")
+                                            except Exception as e:
+                                                logger.error(f"❌ 자동 임베딩 중 오류: {file_info.get('name', 'unknown')} - {e}")
+                                    except Exception as e:
+                                        logger.error(f"❌ 기존 파일 확인 중 오류: {e}")
                         else:
                             logger.warning("⚠️ Cloud Storage에 벡터 저장소 파일이 존재하지 않습니다. 새로 생성해야 합니다.")
                     except Exception as e:
