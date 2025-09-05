@@ -49,21 +49,25 @@ USERS = {
     'user': {'password': 'user123', 'role': 'user'}
 }
 
-# RAG 시스템 초기화
+# RAG 시스템 초기화 (Cloud Run에서는 지연 로딩)
 rag_system = None
 storage = None
+initialization_complete = False
 
 def allowed_file(filename):
     """허용된 파일 확장자 확인"""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def init_app():
-    """애플리케이션 초기화"""
-    global rag_system, storage
+def ensure_initialization():
+    """필요할 때만 초기화 실행"""
+    global rag_system, storage, initialization_complete
+    
+    if initialization_complete:
+        return True
     
     try:
-        logger.info("🚀 애플리케이션 초기화 시작...")
+        logger.info("🚀 지연 초기화 시작...")
         
         # 환경에 따른 스토리지 선택
         if IS_CLOUD_RUN:
@@ -90,21 +94,15 @@ def init_app():
         )
         logger.info("✅ RAG 시스템 초기화 완료")
         
-        # 초기화 상태 확인
-        if rag_system:
-            status = rag_system.get_status()
-            logger.info(f"📊 RAG 시스템 상태: {status}")
-        
-        logger.info("✅ 애플리케이션 초기화 완료")
+        initialization_complete = True
+        logger.info("✅ 지연 초기화 완료")
+        return True
         
     except Exception as e:
-        logger.error(f"❌ 애플리케이션 초기화 실패: {e}")
+        logger.error(f"❌ 지연 초기화 실패: {e}")
         import traceback
         logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
-        # 초기화 실패해도 앱은 계속 실행
-        rag_system = None
-        storage = None
-        logger.warning("⚠️ 일부 기능이 제한될 수 있습니다.")
+        return False
 
 # 데코레이터
 def login_required(f):
@@ -156,6 +154,9 @@ def logout():
 @admin_required
 def admin():
     try:
+        # 초기화 시도
+        ensure_initialization()
+        
         if not storage:
             logger.error("❌ 스토리지가 초기화되지 않았습니다.")
             return render_template('admin.html', 
@@ -181,8 +182,8 @@ def admin():
 @app.route('/api/query', methods=['POST'])
 @login_required
 def query():
-    if not rag_system:
-        return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+    if not ensure_initialization():
+        return jsonify({'error': 'RAG 시스템 초기화에 실패했습니다.'}), 500
     
     try:
         data = request.get_json()
@@ -980,17 +981,7 @@ def not_found_error(error):
 def internal_error(error):
     return render_template('error.html', error='서버 내부 오류가 발생했습니다.'), 500
 
-# Cloud Run에서 애플리케이션 초기화를 비동기로 처리
-def initialize_app_async():
-    """비동기로 애플리케이션 초기화"""
-    try:
-        logger.info("🚀 애플리케이션 초기화 시작...")
-        init_app()
-        logger.info("✅ 애플리케이션 초기화 완료")
-    except Exception as e:
-        logger.error(f"❌ 애플리케이션 초기화 실패: {e}")
-        import traceback
-        logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+# 지연 초기화 함수 (사용하지 않음)
 
 # 간단한 헬스체크 엔드포인트 추가
 @app.route('/health')
@@ -1004,20 +995,7 @@ if __name__ == '__main__':
         port = int(os.environ.get('PORT', 8080))
         logger.info(f"🌐 서버 시작: 0.0.0.0:{port}")
         
-        # 서버를 먼저 시작하고 나중에 초기화
-        import threading
-        import time
-        
-        def delayed_init():
-            """5초 후에 초기화 실행"""
-            time.sleep(5)
-            initialize_app_async()
-        
-        init_thread = threading.Thread(target=delayed_init)
-        init_thread.daemon = True
-        init_thread.start()
-        
-        # 서버 시작
+        # 서버 시작 (초기화 없이)
         app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
     except Exception as e:
         logger.error(f"❌ 애플리케이션 시작 실패: {e}")
