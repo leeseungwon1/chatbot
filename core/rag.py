@@ -41,19 +41,36 @@ class RAGSystem:
         """벡터 저장소 로드"""
         try:
             if self.storage:
-                vector_file = os.path.join(self.storage.local_dir, "vector_store.pkl")
-                logger.info(f"🔍 벡터 파일 경로: {vector_file}")
-                logger.info(f"🔍 벡터 파일 존재 여부: {os.path.exists(vector_file)}")
-                
-                if os.path.exists(vector_file):
-                    with open(vector_file, 'rb') as f:
-                        data = pickle.load(f)
-                        self.documents = data.get('documents', [])
-                        self.embeddings = data.get('embeddings', [])
-                        self.vector_store = data.get('vector_store', {})
-                    logger.info(f"✅ 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩")
+                # Cloud Storage인 경우
+                if hasattr(self.storage, 'bucket'):
+                    try:
+                        vector_blob = self.storage.bucket.blob("vector_store/vector_store.pkl")
+                        if vector_blob.exists():
+                            vector_data = vector_blob.download_as_bytes()
+                            data = pickle.loads(vector_data)
+                            self.documents = data.get('documents', [])
+                            self.embeddings = data.get('embeddings', [])
+                            self.vector_store = data.get('vector_store', {})
+                            logger.info(f"✅ Cloud Storage에서 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩")
+                        else:
+                            logger.warning("⚠️ Cloud Storage에 벡터 저장소 파일이 존재하지 않습니다. 새로 생성해야 합니다.")
+                    except Exception as e:
+                        logger.error(f"❌ Cloud Storage 벡터 저장소 로드 실패: {e}")
                 else:
-                    logger.warning("⚠️ 벡터 저장소 파일이 존재하지 않습니다. 새로 생성해야 합니다.")
+                    # 로컬 스토리지인 경우
+                    vector_file = os.path.join(self.storage.local_dir, "vector_store.pkl")
+                    logger.info(f"🔍 벡터 파일 경로: {vector_file}")
+                    logger.info(f"🔍 벡터 파일 존재 여부: {os.path.exists(vector_file)}")
+                    
+                    if os.path.exists(vector_file):
+                        with open(vector_file, 'rb') as f:
+                            data = pickle.load(f)
+                            self.documents = data.get('documents', [])
+                            self.embeddings = data.get('embeddings', [])
+                            self.vector_store = data.get('vector_store', {})
+                        logger.info(f"✅ 로컬 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩")
+                    else:
+                        logger.warning("⚠️ 로컬 벡터 저장소 파일이 존재하지 않습니다. 새로 생성해야 합니다.")
             else:
                 logger.warning("⚠️ 스토리지가 설정되지 않았습니다.")
         except Exception as e:
@@ -65,15 +82,27 @@ class RAGSystem:
         """벡터 저장소 저장"""
         try:
             if self.storage:
-                vector_file = os.path.join(self.storage.local_dir, "vector_store.pkl")
                 data = {
                     'documents': self.documents,
                     'embeddings': self.embeddings,
                     'vector_store': self.vector_store
                 }
-                with open(vector_file, 'wb') as f:
-                    pickle.dump(data, f)
-                logger.info("✅ 벡터 저장소 저장 완료")
+                
+                # Cloud Storage인 경우
+                if hasattr(self.storage, 'bucket'):
+                    try:
+                        vector_blob = self.storage.bucket.blob("vector_store/vector_store.pkl")
+                        vector_data = pickle.dumps(data)
+                        vector_blob.upload_from_string(vector_data, content_type='application/octet-stream')
+                        logger.info("✅ Cloud Storage에 벡터 저장소 저장 완료")
+                    except Exception as e:
+                        logger.error(f"❌ Cloud Storage 벡터 저장소 저장 실패: {e}")
+                else:
+                    # 로컬 스토리지인 경우
+                    vector_file = os.path.join(self.storage.local_dir, "vector_store.pkl")
+                    with open(vector_file, 'wb') as f:
+                        pickle.dump(data, f)
+                    logger.info("✅ 로컬 벡터 저장소 저장 완료")
         except Exception as e:
             logger.error(f"❌ 벡터 저장소 저장 실패: {e}")
     

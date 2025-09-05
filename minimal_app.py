@@ -279,12 +279,18 @@ def upload_file():
                 # 즉시 임베딩
                 if rag_system:
                     try:
+                        # file_url에서 저장된 파일명 추출
+                        stored_filename = file_url.split('/')[-1]  # gs://bucket/documents/filename에서 filename 추출
                         rag_system.add_document(file_url, file.filename)
-                        storage.mark_embedding_status(file.filename, True)
+                        storage.mark_embedding_status(stored_filename, True)
                         logger.info(f"✅ 임베딩 완료: {file.filename}")
                     except Exception as e:
                         logger.error(f"❌ 임베딩 실패: {file.filename} - {e}")
-                        storage.mark_embedding_status(file.filename, False)
+                        try:
+                            stored_filename = file_url.split('/')[-1]
+                            storage.mark_embedding_status(stored_filename, False)
+                        except:
+                            pass
                 
             except Exception as e:
                 failed_files.append({
@@ -370,10 +376,12 @@ def upload_and_embed():
                     # 즉시 임베딩
                     if rag_system:
                         try:
+                            # file_url에서 저장된 파일명 추출
+                            stored_filename = file_url.split('/')[-1]  # gs://bucket/documents/filename에서 filename 추출
                             rag_system.add_document(file_url, filename)
                             # 임베딩 상태 즉시 업데이트
                             try:
-                                storage.mark_embedding_status(filename, True)
+                                storage.mark_embedding_status(stored_filename, True)
                                 logger.info(f"✅ 임베딩 상태 업데이트 완료: {filename}")
                             except Exception as status_error:
                                 logger.warning(f"⚠️ 임베딩 상태 업데이트 실패: {filename} - {status_error}")
@@ -382,7 +390,8 @@ def upload_and_embed():
                             logger.error(f"❌ 임베딩 실패: {filename} - {e}")
                             # 임베딩 실패 시 상태 업데이트
                             try:
-                                storage.mark_embedding_status(filename, False)
+                                stored_filename = file_url.split('/')[-1]
+                                storage.mark_embedding_status(stored_filename, False)
                                 logger.info(f"✅ 임베딩 실패 상태 업데이트 완료: {filename}")
                             except Exception as status_error:
                                 logger.warning(f"⚠️ 임베딩 실패 상태 업데이트 실패: {filename} - {status_error}")

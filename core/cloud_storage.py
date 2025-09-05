@@ -106,11 +106,23 @@ class CloudStorage:
     def mark_embedding_status(self, filename: str, has_embedding: bool):
         """임베딩 상태 업데이트"""
         try:
-            metadata_blob = self.bucket.blob(f"metadata/{filename}.json")
+            # 먼저 원본 파일명으로 메타데이터 찾기
+            metadata = self.get_metadata()
+            target_metadata_blob = None
             
-            if metadata_blob.exists():
+            # 원본 파일명으로 찾기
+            for stored_filename, file_metadata in metadata.items():
+                if file_metadata.get('original_name') == filename:
+                    target_metadata_blob = self.bucket.blob(f"metadata/{stored_filename}.json")
+                    break
+            
+            # 원본 파일명으로 찾지 못한 경우, 저장된 파일명으로 시도
+            if not target_metadata_blob:
+                target_metadata_blob = self.bucket.blob(f"metadata/{filename}.json")
+            
+            if target_metadata_blob.exists():
                 # 기존 메타데이터 로드
-                content = metadata_blob.download_as_text()
+                content = target_metadata_blob.download_as_text()
                 metadata = json.loads(content)
                 
                 # 임베딩 상태 업데이트
@@ -118,7 +130,7 @@ class CloudStorage:
                 metadata['updated_at'] = datetime.now().isoformat()
                 
                 # 업데이트된 메타데이터 저장
-                metadata_blob.upload_from_string(
+                target_metadata_blob.upload_from_string(
                     json.dumps(metadata, ensure_ascii=False, indent=2),
                     content_type='application/json'
                 )
