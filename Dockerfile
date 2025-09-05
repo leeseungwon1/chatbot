@@ -26,5 +26,5 @@ EXPOSE 8080
 ENV PORT=8080
 ENV ENVIRONMENT=cloud
 
-# 애플리케이션 실행 (테스트용 간단한 앱)
-CMD ["python", "simple_app.py"]
+# 애플리케이션 실행
+CMD ["python", "app.py"]

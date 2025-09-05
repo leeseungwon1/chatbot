@@ -63,8 +63,11 @@ def init_app():
     global rag_system, storage
     
     try:
+        logger.info("🚀 애플리케이션 초기화 시작...")
+        
         # 환경에 따른 스토리지 선택
         if IS_CLOUD_RUN:
+            logger.info("☁️ Cloud Run 환경에서 Cloud Storage 초기화 중...")
             storage = CloudStorage(
                 bucket_name=GCS_BUCKET_NAME,
                 project_id=GCP_PROJECT_ID,
@@ -72,6 +75,7 @@ def init_app():
             )
             logger.info("✅ Cloud Storage 초기화 완료")
         else:
+            logger.info("💾 로컬 환경에서 Local Storage 초기화 중...")
             storage = LocalStorage(
                 bucket_name=GCS_BUCKET_NAME,
                 project_id=GCP_PROJECT_ID,
@@ -80,6 +84,7 @@ def init_app():
             logger.info("✅ 로컬 스토리지 초기화 완료")
         
         # RAG 시스템 초기화
+        logger.info("🤖 RAG 시스템 초기화 중...")
         rag_system = RAGSystem(
             storage=storage
         )
@@ -90,14 +95,16 @@ def init_app():
             status = rag_system.get_status()
             logger.info(f"📊 RAG 시스템 상태: {status}")
         
-        logger.info("✅ 로컬 애플리케이션 초기화 완료")
+        logger.info("✅ 애플리케이션 초기화 완료")
         
     except Exception as e:
         logger.error(f"❌ 애플리케이션 초기화 실패: {e}")
         import traceback
         logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+        # 초기화 실패해도 앱은 계속 실행
         rag_system = None
         storage = None
+        logger.warning("⚠️ 일부 기능이 제한될 수 있습니다.")
 
 # 데코레이터
 def login_required(f):
