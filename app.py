@@ -1,13 +1,13 @@
 import os
+import logging
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from functools import wraps
-from core.rag import RAGSystem
-from core.storage import LocalStorage
-from core.cloud_storage import CloudStorage
-from config import get_config
-import logging
 from werkzeug.utils import secure_filename
 from datetime import datetime
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # 환경 변수 로드
 try:
@@ -15,10 +15,6 @@ try:
     load_dotenv()
 except ImportError:
     pass
-
-# 로깅 설정
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # 로컬 설정 로드
 try:
@@ -29,11 +25,10 @@ except ImportError:
 
 app = Flask(__name__)
 
-# 설정 로드
-config = get_config()
-IS_CLOUD_RUN = config.IS_CLOUD_RUN
-GCP_PROJECT_ID = config.GCP_PROJECT_ID
-GCS_BUCKET_NAME = config.GCS_BUCKET_NAME
+# 환경 변수 직접 설정
+IS_CLOUD_RUN = os.environ.get('ENVIRONMENT') == 'cloud'
+GCP_PROJECT_ID = os.environ.get('GCP_PROJECT_ID')
+GCS_BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME')
 
 # Secret Key 설정
 SECRET_KEY = os.getenv('SECRET_KEY') or 'dev-secret-key-local'
