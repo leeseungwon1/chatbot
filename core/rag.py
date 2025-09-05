@@ -512,8 +512,13 @@ class RAGSystem:
             # 해당 파일의 모든 청크 제거
             indices_to_remove = []
             for i, doc in enumerate(self.documents):
-                if doc['filename'] == filename:
+                # 원본 파일명 또는 저장된 파일명으로 매칭
+                if doc['filename'] == filename or doc.get('stored_filename') == filename:
                     indices_to_remove.append(i)
+            
+            if not indices_to_remove:
+                logger.warning(f"⚠️ 제거할 문서를 찾을 수 없음: {filename}")
+                return False
             
             # 역순으로 제거 (인덱스 변화 방지)
             for i in reversed(indices_to_remove):
@@ -528,7 +533,7 @@ class RAGSystem:
             # 저장
             self._save_vector_store()
             
-            logger.info(f"✅ 문서 제거 완료: {filename}")
+            logger.info(f"✅ 문서 제거 완료: {filename} ({len(indices_to_remove)}개 청크)")
             return True
             
         except Exception as e:
