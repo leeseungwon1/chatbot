@@ -260,6 +260,17 @@ class RAGSystem:
                             logger.info(f"✅ 로컬 파일에서 다운로드: {len(content)} bytes")
                         else:
                             raise ValueError(f"로컬 파일을 읽을 수 없습니다: {filename}")
+                elif file_url.startswith('gs://'):
+                    # Google Cloud Storage URL에서 다운로드
+                    if self.storage and hasattr(self.storage, 'bucket'):
+                        # Cloud Storage 클라이언트 사용
+                        blob_name = file_url.replace(f"gs://{self.storage.bucket_name}/", "")
+                        blob = self.storage.bucket.blob(blob_name)
+                        content = blob.download_as_bytes()
+                        temp_file.write(content)
+                        logger.info(f"✅ Cloud Storage에서 다운로드: {len(content)} bytes")
+                    else:
+                        raise ValueError("Cloud Storage 클라이언트가 설정되지 않았습니다")
                 else:
                     # HTTP URL에서 다운로드
                     response = requests.get(file_url)
