@@ -3,8 +3,19 @@
 Cloud Run 배포를 위한 단계적 Flask 애플리케이션
 """
 import os
+import logging
 from flask import Flask, jsonify, render_template_string, request, session, redirect, url_for
 from functools import wraps
+from datetime import datetime
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# RAG 시스템 초기화 (지연 로딩)
+rag_system = None
+storage = None
+initialization_complete = False
 
 app = Flask(__name__)
 
@@ -36,6 +47,59 @@ def admin_required(f):
             return jsonify({'error': '관리자 권한이 필요합니다.'}), 403
         return f(*args, **kwargs)
     return decorated_function
+
+def ensure_initialization():
+    """필요할 때만 RAG 시스템 초기화"""
+    global rag_system, storage, initialization_complete
+    
+    if initialization_complete:
+        return True
+    
+    try:
+        logger.info("🚀 RAG 시스템 초기화 시작...")
+        
+        # 환경 변수 확인
+        is_cloud_run = os.environ.get('ENVIRONMENT') == 'cloud'
+        gcp_project_id = os.environ.get('GCP_PROJECT_ID')
+        gcs_bucket_name = os.environ.get('GCS_BUCKET_NAME')
+        
+        logger.info(f"환경: {'Cloud Run' if is_cloud_run else 'Local'}")
+        logger.info(f"프로젝트 ID: {gcp_project_id}")
+        logger.info(f"버킷 이름: {gcs_bucket_name}")
+        
+        if is_cloud_run and gcp_project_id and gcs_bucket_name:
+            # Cloud Storage 초기화
+            from core.cloud_storage import CloudStorage
+            storage = CloudStorage(
+                bucket_name=gcs_bucket_name,
+                project_id=gcp_project_id,
+                is_cloud_run=True
+            )
+            logger.info("✅ Cloud Storage 초기화 완료")
+        else:
+            # 로컬 스토리지 초기화
+            from core.storage import LocalStorage
+            storage = LocalStorage(
+                bucket_name=gcs_bucket_name or 'local-bucket',
+                project_id=gcp_project_id or 'local-project',
+                is_cloud_run=False
+            )
+            logger.info("✅ 로컬 스토리지 초기화 완료")
+        
+        # RAG 시스템 초기화
+        from core.rag import RAGSystem
+        rag_system = RAGSystem(storage=storage)
+        logger.info("✅ RAG 시스템 초기화 완료")
+        
+        initialization_complete = True
+        logger.info("✅ 전체 초기화 완료")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ RAG 시스템 초기화 실패: {e}")
+        import traceback
+        logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+        return False
 
 # 기본 HTML 템플릿
 BASE_TEMPLATE = """
@@ -81,8 +145,65 @@ BASE_TEMPLATE = """
             <a href="/admin"><button>관리자 페이지</button></a>
             {% endif %}
         </div>
+        
+        <!-- 채팅 인터페이스 -->
+        <div style="margin-top: 30px; border: 1px solid #ddd; padding: 20px; border-radius: 5px;">
+            <h3>AI 챗봇</h3>
+            <div id="chat-container" style="height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin: 10px 0; background: #f9f9f9;">
+                <p><em>질문을 입력해주세요...</em></p>
+            </div>
+            <form id="chat-form" style="display: flex; gap: 10px;">
+                <input type="text" id="question-input" placeholder="질문을 입력하세요..." style="flex: 1; padding: 10px;">
+                <button type="submit" style="padding: 10px 20px;">전송</button>
+            </form>
+        </div>
         {% endif %}
     </div>
+    
+    <script>
+        document.getElementById('chat-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const question = document.getElementById('question-input').value;
+            if (!question.trim()) return;
+            
+            const chatContainer = document.getElementById('chat-container');
+            const questionDiv = document.createElement('div');
+            questionDiv.innerHTML = '<strong>질문:</strong> ' + question;
+            questionDiv.style.marginBottom = '10px';
+            chatContainer.appendChild(questionDiv);
+            
+            const loadingDiv = document.createElement('div');
+            loadingDiv.innerHTML = '<em>답변을 생성 중입니다...</em>';
+            loadingDiv.style.color = '#666';
+            chatContainer.appendChild(loadingDiv);
+            
+            try {
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ question: question })
+                });
+                
+                const data = await response.json();
+                loadingDiv.remove();
+                
+                const answerDiv = document.createElement('div');
+                answerDiv.innerHTML = '<strong>답변:</strong> ' + (data.answer || data.error || '답변을 생성할 수 없습니다.');
+                answerDiv.style.marginBottom = '20px';
+                answerDiv.style.padding = '10px';
+                answerDiv.style.backgroundColor = '#e8f4f8';
+                answerDiv.style.borderRadius = '5px';
+                chatContainer.appendChild(answerDiv);
+                
+                document.getElementById('question-input').value = '';
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            } catch (error) {
+                loadingDiv.innerHTML = '<em style="color: red;">오류가 발생했습니다: ' + error.message + '</em>';
+            }
+        });
+    </script>
 </body>
 </html>
 """
@@ -121,14 +242,81 @@ def logout():
     session.clear()
     return redirect(url_for('index'))
 
+@app.route('/api/query', methods=['POST'])
+@login_required
+def query():
+    if not ensure_initialization():
+        return jsonify({'error': 'RAG 시스템 초기화에 실패했습니다.'}), 500
+    
+    try:
+        data = request.get_json()
+        question = data.get('question', '').strip()
+        
+        if not question:
+            return jsonify({'error': '질문을 입력해주세요.'}), 400
+        
+        # 세션에서 대화 히스토리 가져오기
+        chat_history = session.get('chat_history', [])
+        
+        # RAG 시스템으로 질의
+        answer = rag_system.query(question, chat_history)
+        
+        # 새 대화를 히스토리에 추가
+        new_conversation = {
+            'question': question,
+            'answer': answer,
+            'timestamp': datetime.now().isoformat()
+        }
+        chat_history.append(new_conversation)
+        
+        # 최대 50개 대화만 유지
+        if len(chat_history) > 50:
+            chat_history = chat_history[-50:]
+        
+        # 세션에 히스토리 저장
+        session['chat_history'] = chat_history
+        
+        return jsonify({
+            'answer': answer,
+            'question': question,
+            'context_used': len(chat_history) - 1
+        })
+        
+    except Exception as e:
+        logger.error(f"질의 처리 중 오류: {e}")
+        return jsonify({'error': '질의 처리 중 오류가 발생했습니다.'}), 500
+
 @app.route('/admin')
 @admin_required
 def admin():
-    return jsonify({
-        'message': '관리자 페이지입니다.',
-        'user': session.get('username'),
-        'role': session.get('role')
-    })
+    if not ensure_initialization():
+        return jsonify({
+            'message': 'RAG 시스템 초기화에 실패했습니다.',
+            'user': session.get('username'),
+            'role': session.get('role')
+        })
+    
+    try:
+        files = storage.list_files() if storage else []
+        storage_info = storage.get_storage_info() if storage else {}
+        rag_status = rag_system.get_status() if rag_system else {}
+        
+        return jsonify({
+            'message': '관리자 페이지입니다.',
+            'user': session.get('username'),
+            'role': session.get('role'),
+            'files': files,
+            'storage_info': storage_info,
+            'rag_status': rag_status
+        })
+    except Exception as e:
+        logger.error(f"관리자 페이지 로드 중 오류: {e}")
+        return jsonify({
+            'message': '관리자 페이지 로드 중 오류가 발생했습니다.',
+            'user': session.get('username'),
+            'role': session.get('role'),
+            'error': str(e)
+        })
 
 @app.route('/health')
 def health():
