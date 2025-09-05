@@ -58,7 +58,7 @@ class CloudStorage:
                 content_type='application/json'
             )
             
-            logger.info(f"✅ 파일 업로드 완료: {filename} -> {stored_filename}")
+            logger.info(f"✅ 파일 업로드 완료: {original_filename} -> {stored_filename}")
             return f"gs://{self.bucket_name}/documents/{stored_filename}"
             
         except Exception as e:
