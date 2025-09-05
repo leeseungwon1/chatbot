@@ -331,11 +331,117 @@ def health():
         'port': os.environ.get('PORT', 'unknown')
     })
 
+@app.route('/api/upload', methods=['POST'])
+@admin_required
+def upload_file():
+    if not ensure_initialization():
+        return jsonify({'error': 'RAG 시스템 초기화에 실패했습니다.'}), 500
+    
+    try:
+        if 'files[]' not in request.files:
+            return jsonify({'error': '파일이 선택되지 않았습니다.'}), 400
+        
+        files = request.files.getlist('files[]')
+        if not files or files[0].filename == '':
+            return jsonify({'error': '파일이 선택되지 않았습니다.'}), 400
+        
+        uploaded_files = []
+        failed_files = []
+        
+        for file in files:
+            try:
+                # 파일 형식 검증
+                allowed_extensions = {'pdf', 'docx', 'doc', 'txt', 'md'}
+                if not ('.' in file.filename and 
+                       file.filename.rsplit('.', 1)[1].lower() in allowed_extensions):
+                    failed_files.append({
+                        'filename': file.filename,
+                        'error': f'지원하지 않는 파일 형식입니다. 허용된 형식: {", ".join(allowed_extensions)}'
+                    })
+                    continue
+                
+                # 파일 크기 검증 (50MB)
+                file.seek(0, 2)
+                file_size = file.tell()
+                file.seek(0)
+                
+                if file_size > 50 * 1024 * 1024:
+                    failed_files.append({
+                        'filename': file.filename,
+                        'error': '파일 크기가 너무 큽니다. 최대 크기: 50MB'
+                    })
+                    continue
+                
+                # 파일 업로드
+                file_url = storage.upload_file(file, file.filename)
+                uploaded_files.append({
+                    'filename': file.filename,
+                    'url': file_url
+                })
+                
+                # 즉시 임베딩
+                if rag_system:
+                    try:
+                        rag_system.add_document(file_url, file.filename)
+                        storage.mark_embedding_status(file.filename, True)
+                        logger.info(f"✅ 임베딩 완료: {file.filename}")
+                    except Exception as e:
+                        logger.error(f"❌ 임베딩 실패: {file.filename} - {e}")
+                        storage.mark_embedding_status(file.filename, False)
+                
+            except Exception as e:
+                failed_files.append({
+                    'filename': file.filename,
+                    'error': str(e)
+                })
+        
+        return jsonify({
+            'message': f'{len(uploaded_files)}개 파일이 성공적으로 업로드되었습니다.',
+            'uploaded_files': uploaded_files,
+            'failed_files': failed_files,
+            'total_uploaded': len(uploaded_files),
+            'total_failed': len(failed_files)
+        })
+        
+    except Exception as e:
+        logger.error(f"파일 업로드 중 오류: {e}")
+        return jsonify({'error': '파일 업로드 중 오류가 발생했습니다.'}), 500
+
+@app.route('/api/files/<filename>', methods=['DELETE'])
+@admin_required
+def delete_file(filename):
+    if not ensure_initialization():
+        return jsonify({'error': 'RAG 시스템 초기화에 실패했습니다.'}), 500
+    
+    try:
+        # URL 디코딩
+        import urllib.parse
+        decoded_filename = urllib.parse.unquote(filename)
+        
+        # 파일 삭제
+        success = storage.delete_file(decoded_filename)
+        if not success:
+            return jsonify({'error': '파일을 찾을 수 없거나 삭제할 수 없습니다.'}), 404
+        
+        # RAG 시스템에서 문서 제거
+        if rag_system:
+            try:
+                rag_system.remove_document(decoded_filename)
+                logger.info(f"✅ RAG 시스템에서 문서 제거: {decoded_filename}")
+            except Exception as e:
+                logger.warning(f"⚠️ RAG 시스템에서 문서 제거 실패: {e}")
+        
+        return jsonify({'message': '파일이 삭제되었습니다.'})
+        
+    except Exception as e:
+        logger.error(f"파일 삭제 중 오류: {e}")
+        return jsonify({'error': '파일 삭제 중 오류가 발생했습니다.'}), 500
+
 @app.route('/api/status')
 def status():
     return jsonify({
         'status': 'ok',
-        'message': 'Enhanced app with RAG system',
+        'message': 'Enhanced app with file upload',
         'environment': os.environ.get('ENVIRONMENT', 'unknown'),
         'authenticated': session.get('authenticated', False),
         'username': session.get('username'),
