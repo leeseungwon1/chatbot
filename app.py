@@ -974,7 +974,19 @@ def internal_error(error):
     return render_template('error.html', error='서버 내부 오류가 발생했습니다.'), 500
 
 if __name__ == '__main__':
-    init_app()
-    # Cloud Run에서 PORT 환경변수 사용
-    port = int(os.environ.get('PORT', 8080))
-    app.run(debug=False, host='0.0.0.0', port=port)
+    try:
+        # 애플리케이션 초기화
+        logger.info("🚀 애플리케이션 시작 중...")
+        init_app()
+        logger.info("✅ 애플리케이션 초기화 완료")
+        
+        # Cloud Run에서 PORT 환경변수 사용
+        port = int(os.environ.get('PORT', 8080))
+        logger.info(f"🌐 서버 시작: 0.0.0.0:{port}")
+        
+        app.run(debug=False, host='0.0.0.0', port=port)
+    except Exception as e:
+        logger.error(f"❌ 애플리케이션 시작 실패: {e}")
+        import traceback
+        logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+        raise
