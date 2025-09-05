@@ -412,7 +412,8 @@ def upload_and_embed():
                         try:
                             # file_url에서 저장된 파일명 추출
                             stored_filename = file_url.split('/')[-1]  # gs://bucket/documents/filename에서 filename 추출
-                            rag_system.add_document(file_url, filename)
+                            logger.info(f"📄 임베딩 시작: {filename} (저장된 파일명: {stored_filename})")
+                            rag_system.add_document(file_url, stored_filename)
                             # 임베딩 상태 즉시 업데이트
                             try:
                                 storage.mark_embedding_status(stored_filename, True)
