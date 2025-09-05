@@ -15,6 +15,20 @@ from werkzeug.utils import secure_filename
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# 환경 변수 로드
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# 로컬 설정 로드
+try:
+    import local_config
+    logger.info("✅ 로컬 설정 로드 완료")
+except ImportError:
+    logger.warning("⚠️ local_config.py를 찾을 수 없습니다")
+
 # RAG 시스템 초기화 (지연 로딩)
 rag_system = None
 storage = None
