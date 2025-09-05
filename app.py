@@ -973,16 +973,35 @@ def not_found_error(error):
 def internal_error(error):
     return render_template('error.html', error='서버 내부 오류가 발생했습니다.'), 500
 
-if __name__ == '__main__':
+# Cloud Run에서 애플리케이션 초기화를 비동기로 처리
+def initialize_app_async():
+    """비동기로 애플리케이션 초기화"""
     try:
-        # 애플리케이션 초기화
-        logger.info("🚀 애플리케이션 시작 중...")
+        logger.info("🚀 애플리케이션 초기화 시작...")
         init_app()
         logger.info("✅ 애플리케이션 초기화 완료")
-        
+    except Exception as e:
+        logger.error(f"❌ 애플리케이션 초기화 실패: {e}")
+        import traceback
+        logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+
+# 간단한 헬스체크 엔드포인트 추가
+@app.route('/health')
+def health_check():
+    """Cloud Run 헬스체크용 엔드포인트"""
+    return jsonify({'status': 'healthy', 'message': 'Service is running'})
+
+if __name__ == '__main__':
+    try:
         # Cloud Run에서 PORT 환경변수 사용
         port = int(os.environ.get('PORT', 8080))
         logger.info(f"🌐 서버 시작: 0.0.0.0:{port}")
+        
+        # 서버 시작 후 백그라운드에서 초기화
+        import threading
+        init_thread = threading.Thread(target=initialize_app_async)
+        init_thread.daemon = True
+        init_thread.start()
         
         app.run(debug=False, host='0.0.0.0', port=port)
     except Exception as e:
