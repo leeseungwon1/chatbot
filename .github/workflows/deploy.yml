@@ -50,9 +50,10 @@ jobs:
     - name: Grant Secret Manager permissions
       run: |
         # Cloud Run 기본 서비스 계정에 Secret Manager 접근 권한 부여
-        gcloud projects add-iam-policy-binding $PROJECT_ID \
-          --member="serviceAccount:623489522024-compute@developer.gserviceaccount.com" \
-          --role="roles/secretmanager.secretAccessor"
+        # GitHub Actions 서비스 계정에 IAM 권한이 필요하므로 수동으로 설정해야 함
+        echo "Cloud Run 서비스 계정에 Secret Manager 권한을 수동으로 부여해야 합니다:"
+        echo "gcloud projects add-iam-policy-binding $PROJECT_ID --member='serviceAccount:623489522024-compute@developer.gserviceaccount.com' --role='roles/secretmanager.secretAccessor'"
+        echo "또는 GCP 콘솔에서 IAM & Admin → IAM에서 설정하세요."
 
     - name: Deploy to Cloud Run
       run: |
