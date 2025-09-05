@@ -190,10 +190,13 @@ class CloudStorage:
             
             for filename, file_metadata in metadata.items():
                 files.append({
-                    'name': filename,
-                    'filename': file_metadata.get('original_name', filename),
+                    'name': file_metadata.get('original_name', filename),
+                    'filename': filename,
                     'size': file_metadata.get('size', 0),
+                    'size_mb': round(file_metadata.get('size', 0) / (1024 * 1024), 2),
                     'uploaded_at': file_metadata.get('uploaded_at', ''),
+                    'created': file_metadata.get('uploaded_at', ''),
+                    'updated': file_metadata.get('updated_at', file_metadata.get('uploaded_at', '')),
                     'has_embedding': file_metadata.get('has_embedding', False),
                     'url': f"gs://{self.bucket_name}/documents/{filename}",
                     'content_type': file_metadata.get('content_type', '')
