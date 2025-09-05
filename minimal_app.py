@@ -344,18 +344,29 @@ def delete_file(filename):
         import urllib.parse
         decoded_filename = urllib.parse.unquote(filename)
         
+        # RAG 시스템에서 문서 제거 (파일 삭제 전에)
+        if rag_system:
+            try:
+                # 저장된 파일 목록에서 해당 파일의 저장된 이름 찾기
+                files = storage.list_files()
+                stored_filename = None
+                for file_info in files:
+                    if file_info['name'] == decoded_filename:  # name은 원본 파일명
+                        stored_filename = file_info['filename']  # filename은 저장된 파일명
+                        break
+                
+                if stored_filename:
+                    rag_system.remove_document(stored_filename)
+                    logger.info(f"✅ RAG 시스템에서 문서 제거: {stored_filename}")
+                else:
+                    logger.warning(f"⚠️ RAG 시스템에서 파일을 찾을 수 없음: {decoded_filename}")
+            except Exception as e:
+                logger.warning(f"⚠️ RAG 시스템에서 문서 제거 실패: {e}")
+        
         # 파일 삭제
         success = storage.delete_file(decoded_filename)
         if not success:
             return jsonify({'error': '파일을 찾을 수 없거나 삭제할 수 없습니다.'}), 404
-        
-        # RAG 시스템에서 문서 제거
-        if rag_system:
-            try:
-                rag_system.remove_document(decoded_filename)
-                logger.info(f"✅ RAG 시스템에서 문서 제거: {decoded_filename}")
-            except Exception as e:
-                logger.warning(f"⚠️ RAG 시스템에서 문서 제거 실패: {e}")
         
         return jsonify({'message': '파일이 삭제되었습니다.'})
         
