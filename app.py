@@ -675,6 +675,62 @@ def clear_index():
         logger.error(f"임베딩 초기화 중 오류: {e}")
         return jsonify({'error': '임베딩 초기화 중 오류가 발생했습니다.'}), 500
 
+@app.route('/api/admin/force-sync', methods=['POST'])
+@admin_required
+def force_sync_embeddings():
+    """강제로 스토리지와 벡터 저장소 동기화"""
+    try:
+        if not rag_system or not storage:
+            return jsonify({'error': 'RAG 시스템 또는 스토리지가 초기화되지 않았습니다.'}), 500
+        
+        logger.info("🔄 강제 동기화 시작")
+        
+        # 모든 파일 조회
+        files = storage.list_files()
+        logger.info(f"📁 스토리지에서 {len(files)}개 파일 발견")
+        
+        embedded_count = 0
+        failed_count = 0
+        
+        for file_info in files:
+            try:
+                file_url = file_info.get('url')
+                original_name = file_info.get('name')
+                stored_filename = file_info.get('filename')
+                has_embedding = file_info.get('has_embedding', False)
+                
+                if file_url and stored_filename:
+                    if not has_embedding:
+                        logger.info(f"📄 강제 임베딩 시작: {original_name}")
+                        success = rag_system.add_document(file_url, stored_filename)
+                        if success:
+                            logger.info(f"✅ 강제 임베딩 완료: {original_name}")
+                            embedded_count += 1
+                        else:
+                            logger.error(f"❌ 강제 임베딩 실패: {original_name}")
+                            failed_count += 1
+                    else:
+                        logger.info(f"ℹ️ 이미 임베딩된 파일 건너뜀: {original_name}")
+                else:
+                    logger.warning(f"⚠️ 파일 정보 불완전: {file_info}")
+                    failed_count += 1
+                    
+            except Exception as e:
+                logger.error(f"❌ 강제 임베딩 중 오류: {file_info.get('name', 'unknown')} - {e}")
+                failed_count += 1
+        
+        logger.info(f"✅ 강제 동기화 완료: {embedded_count}개 성공, {failed_count}개 실패")
+        return jsonify({
+            'message': f'강제 동기화가 완료되었습니다. {embedded_count}개 파일 임베딩 성공, {failed_count}개 실패',
+            'embedded_count': embedded_count,
+            'failed_count': failed_count,
+            'total_files': len(files)
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ 강제 동기화 실패: {e}")
+        return jsonify({'error': f'강제 동기화에 실패했습니다: {str(e)}'}), 500
+
 # 새로운 관리자 API 엔드포인트들
 @app.route('/api/admin/system-status')
 @admin_required
