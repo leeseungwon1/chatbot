@@ -2,15 +2,16 @@ import os
 from typing import Optional
 
 def get_config():
-    """환경에 따른 설정 반환"""
-    environment = os.getenv('ENVIRONMENT', 'local')
+    """환경에 따른 설정 반환 (Cloud 전용)"""
+    environment = os.getenv('ENVIRONMENT', 'cloud')
     
     if environment == 'cloud':
         from .cloud import CloudConfig
         return CloudConfig()
     else:
-        from .local import LocalConfig
-        return LocalConfig()
+        # 로컬 환경도 Cloud 설정 사용
+        from .cloud import CloudConfig
+        return CloudConfig()
 
 class BaseConfig:
     """기본 설정 클래스"""

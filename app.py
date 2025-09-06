@@ -5,6 +5,10 @@ from functools import wraps
 from werkzeug.utils import secure_filename
 from datetime import datetime
 
+# Cloud 모듈 import
+from core.cloud_storage import CloudStorage
+from core.rag import RAGSystem
+
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,11 +21,7 @@ except ImportError:
     pass
 
 # 로컬 설정 로드
-try:
-    import local_config
-    logger.info("✅ 로컬 설정 로드 완료")
-except ImportError:
-    logger.warning("⚠️ local_config.py를 찾을 수 없습니다")
+# 온라인 전용 시스템으로 로컬 설정 불필요
 
 app = Flask(__name__)
 
@@ -82,13 +82,8 @@ def ensure_initialization():
             )
             logger.info("✅ Cloud Storage 초기화 완료")
         else:
-            # 로컬 스토리지 초기화
-            storage = LocalStorage(
-                bucket_name=gcs_bucket_name or 'local-bucket',
-                project_id=gcp_project_id or 'local-project',
-                is_cloud_run=False
-            )
-            logger.info("✅ 로컬 스토리지 초기화 완료")
+            logger.error("❌ Cloud Storage 환경 변수가 설정되지 않았습니다")
+            raise ValueError("Cloud Storage 전용 시스템입니다")
         
         # RAG 시스템 초기화
         logger.info("🤖 RAG 시스템 초기화 중...")
@@ -409,6 +404,19 @@ def delete_file(filename):
         if not success:
             return jsonify({'error': '파일을 찾을 수 없거나 삭제할 수 없습니다.'}), 404
         
+        # 파일 삭제 후 pkl 파일도 강제로 삭제 (이중 보장)
+        if rag_system:
+            try:
+                logger.info("🗑️ 파일 삭제 후 pkl 파일 강제 삭제 시도")
+                rag_system._delete_vector_store()
+                # 메모리에서도 초기화
+                rag_system.documents = []
+                rag_system.embeddings = []
+                rag_system.vector_store = {}
+                logger.info("✅ pkl 파일 강제 삭제 및 메모리 초기화 완료")
+            except Exception as e:
+                logger.error(f"❌ pkl 파일 강제 삭제 실패: {e}")
+        
         return jsonify({'message': '파일이 삭제되었습니다.'})
         
     except Exception as e:
@@ -472,6 +480,19 @@ def batch_delete_files():
         
         # 그 다음 스토리지에서 파일 삭제
         results = storage.delete_multiple_files(filenames)
+        
+        # 파일 삭제 후 pkl 파일도 강제로 삭제 (이중 보장)
+        if rag_system and any(results.values()):
+            try:
+                logger.info("🗑️ 배치 파일 삭제 후 pkl 파일 강제 삭제 시도")
+                rag_system._delete_vector_store()
+                # 메모리에서도 초기화
+                rag_system.documents = []
+                rag_system.embeddings = []
+                rag_system.vector_store = {}
+                logger.info("✅ 배치 삭제 후 pkl 파일 강제 삭제 및 메모리 초기화 완료")
+            except Exception as e:
+                logger.error(f"❌ 배치 삭제 후 pkl 파일 강제 삭제 실패: {e}")
         
         deleted_count = sum(1 for success in results.values() if success)
         
@@ -853,20 +874,12 @@ def get_vector_db_info():
         # 벡터 저장소 정보
         vector_info = rag_system.get_vector_db_info()
         
-        # 로컬 스토리지 용량
-        storage_path = "./local_storage"
-        total_size = 0
-        if os.path.exists(storage_path):
-            for dirpath, dirnames, filenames in os.walk(storage_path):
-                for filename in filenames:
-                    filepath = os.path.join(dirpath, filename)
-                    total_size += os.path.getsize(filepath)
         
         return jsonify({
             'vector_db': vector_info,
             'storage': {
-                'total_size_mb': round(total_size / (1024**2), 2),
-                'vector_store_size_mb': round(os.path.getsize("./local_storage/vector_store.pkl") / (1024**2), 2) if os.path.exists("./local_storage/vector_store.pkl") else 0
+                'total_size_mb': 0,  # Cloud Storage는 용량 계산 불가
+                'vector_store_size_mb': vector_info.get('db_size_mb', 0)
             }
         })
         
@@ -934,21 +947,8 @@ def backup_vectors():
         if not rag_system:
             return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
         
-        # 백업 파일명 생성
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_filename = f"vector_backup_{timestamp}.pkl"
-        backup_path = os.path.join("./local_storage", backup_filename)
-        
-        # 백업 실행
-        success = rag_system.backup_vectors(backup_path)
-        
-        if success:
-            return jsonify({
-                'message': '벡터 저장소 백업이 완료되었습니다.',
-                'backup_file': backup_filename
-            })
-        else:
-            return jsonify({'error': '백업에 실패했습니다.'}), 500
+        # Cloud Storage에는 백업 기능 비활성화
+        return jsonify({'error': 'Cloud Storage 환경에서는 백업 기능이 지원되지 않습니다.'}), 400
         
     except Exception as e:
         logger.error(f"벡터 백업 중 오류: {e}")
@@ -962,24 +962,8 @@ def restore_vectors():
         if not rag_system:
             return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
         
-        data = request.get_json()
-        backup_filename = data.get('backup_filename')
-        
-        if not backup_filename:
-            return jsonify({'error': '복원할 백업 파일명을 입력해주세요.'}), 400
-        
-        backup_path = os.path.join("./local_storage", backup_filename)
-        
-        if not os.path.exists(backup_path):
-            return jsonify({'error': '백업 파일을 찾을 수 없습니다.'}), 404
-        
-        # 복원 실행
-        success = rag_system.restore_vectors(backup_path)
-        
-        if success:
-            return jsonify({'message': '벡터 저장소 복원이 완료되었습니다.'})
-        else:
-            return jsonify({'error': '복원에 실패했습니다.'}), 500
+        # Cloud Storage에는 복원 기능 비활성화
+        return jsonify({'error': 'Cloud Storage 환경에서는 복원 기능이 지원되지 않습니다.'}), 400
         
     except Exception as e:
         logger.error(f"벡터 복원 중 오류: {e}")

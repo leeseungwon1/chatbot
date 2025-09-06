@@ -181,60 +181,7 @@ class RAGSystem:
                     except Exception as e:
                         logger.error(f"❌ Cloud Storage 벡터 저장소 로드 실패: {e}")
                 else:
-                    # 로컬 스토리지인 경우
-                    vector_file = os.path.join(self.storage.local_dir, "vector_store.pkl")
-                    logger.info(f"🔍 벡터 파일 경로: {vector_file}")
-                    logger.info(f"🔍 벡터 파일 존재 여부: {os.path.exists(vector_file)}")
-                    
-                    if os.path.exists(vector_file):
-                        with open(vector_file, 'rb') as f:
-                            data = pickle.load(f)
-                            self.documents = data.get('documents', [])
-                            self.embeddings = data.get('embeddings', [])
-                            self.vector_store = data.get('vector_store', {})
-                        embedding_dim = len(self.embeddings[0]) if self.embeddings else 0
-                        logger.info(f"✅ 로컬 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩 (차원: {embedding_dim})")
-                        logger.info(f"🔍 로드된 문서 목록: {[doc.get('filename', 'unknown') for doc in self.documents[:5]]}")
-                        
-                        # 스토리지와 벡터 저장소 동기화
-                        if self.storage:
-                            files = self.storage.list_files()
-                            logger.info(f"📁 스토리지에서 {len(files)}개 파일 발견")
-                            
-                            # 벡터 저장소의 문서 수와 스토리지의 파일 수 비교
-                            if len(self.documents) == 0 or len(self.documents) < len(files):
-                                logger.info("🔍 벡터 저장소가 비어있거나 불완전합니다. 기존 파일들을 확인합니다...")
-                                try:
-                                    for file_info in files:
-                                        try:
-                                            file_url = file_info.get('url')
-                                            original_name = file_info.get('name')  # 원본 파일명
-                                            stored_filename = file_info.get('filename')  # 저장된 파일명
-                                            has_embedding = file_info.get('has_embedding', False)
-                                            
-                                            if file_url and stored_filename:
-                                                # 임베딩이 없는 파일만 처리
-                                                if not has_embedding:
-                                                    logger.info(f"📄 자동 임베딩 시작: {original_name} (저장된 파일명: {stored_filename})")
-                                                    success = self.add_document(file_url, stored_filename)
-                                                    if success:
-                                                        logger.info(f"✅ 자동 임베딩 완료: {original_name}")
-                                                    else:
-                                                        logger.error(f"❌ 자동 임베딩 실패: {original_name}")
-                                                else:
-                                                    logger.info(f"ℹ️ 이미 임베딩된 파일 건너뜀: {original_name}")
-                                            else:
-                                                logger.warning(f"⚠️ 파일 정보 불완전: {file_info}")
-                                        except Exception as e:
-                                            logger.error(f"❌ 자동 임베딩 중 오류: {file_info.get('name', 'unknown')} - {e}")
-                                            import traceback
-                                            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
-                                except Exception as e:
-                                    logger.error(f"❌ 기존 파일 확인 중 오류: {e}")
-                            else:
-                                logger.info(f"ℹ️ 벡터 저장소가 최신 상태입니다: {len(self.documents)}개 문서")
-                    else:
-                        logger.warning("⚠️ 로컬 벡터 저장소 파일이 존재하지 않습니다. 새로 생성해야 합니다.")
+                    logger.error("❌ Cloud Storage가 초기화되지 않았습니다")
             else:
                 logger.warning("⚠️ 스토리지가 설정되지 않았습니다.")
         except Exception as e:
@@ -252,7 +199,7 @@ class RAGSystem:
                     'vector_store': self.vector_store
                 }
                 
-                # Cloud Storage인 경우
+                # Cloud Storage 전용
                 if hasattr(self.storage, 'bucket'):
                     try:
                         vector_blob = self.storage.bucket.blob("vector_store/vector_store.pkl")
@@ -262,33 +209,23 @@ class RAGSystem:
                     except Exception as e:
                         logger.error(f"❌ Cloud Storage 벡터 저장소 저장 실패: {e}")
                 else:
-                    # 로컬 스토리지인 경우
-                    vector_file = os.path.join(self.storage.local_dir, "vector_store.pkl")
-                    with open(vector_file, 'wb') as f:
-                        pickle.dump(data, f)
-                    logger.info("✅ 로컬 벡터 저장소 저장 완료")
+                    logger.error("❌ Cloud Storage가 초기화되지 않았습니다")
         except Exception as e:
             logger.error(f"❌ 벡터 저장소 저장 실패: {e}")
     
     def _delete_vector_store(self):
-        """벡터 저장소 파일 삭제"""
+        """벡터 저장소 파일 삭제 (Cloud Storage 전용)"""
         try:
             if self.storage and hasattr(self.storage, 'bucket'):
                 # Cloud Storage에서 벡터 저장소 파일 삭제
-                vector_blob = self.storage.bucket.blob('vector_store.pkl')
+                vector_blob = self.storage.bucket.blob('vector_store/vector_store.pkl')
                 if vector_blob.exists():
                     vector_blob.delete()
                     logger.info("✅ Cloud Storage에서 벡터 저장소 파일 삭제 완료")
                 else:
                     logger.info("ℹ️ Cloud Storage에 벡터 저장소 파일이 존재하지 않음")
             else:
-                # 로컬에서 벡터 저장소 파일 삭제
-                vector_file = 'local_storage/vector_store.pkl'
-                if os.path.exists(vector_file):
-                    os.remove(vector_file)
-                    logger.info("✅ 로컬 벡터 저장소 파일 삭제 완료")
-                else:
-                    logger.info("ℹ️ 로컬에 벡터 저장소 파일이 존재하지 않음")
+                logger.error("❌ Cloud Storage가 초기화되지 않았습니다")
         except Exception as e:
             logger.error(f"❌ 벡터 저장소 파일 삭제 실패: {e}")
             import traceback
@@ -611,19 +548,7 @@ class RAGSystem:
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as temp_file:
                 logger.info(f"📥 파일 다운로드 시작: {file_url}")
                 
-                if file_url.startswith('local://'):
-                    # 로컬 파일에서 다운로드
-                    logger.info(f"📁 로컬 파일 다운로드 시도: {filename}")
-                    if self.storage:
-                        content = self.storage.download_file(filename)
-                        if content:
-                            temp_file.write(content)
-                            logger.info(f"✅ 로컬 파일에서 다운로드: {len(content)} bytes")
-                        else:
-                            raise ValueError(f"로컬 파일을 읽을 수 없습니다: {filename}")
-                    else:
-                        raise ValueError("로컬 스토리지가 설정되지 않았습니다")
-                elif file_url.startswith('gs://'):
+                if file_url.startswith('gs://'):
                     # Google Cloud Storage URL에서 다운로드
                     logger.info(f"☁️ Cloud Storage 다운로드 시도: {file_url}")
                     if self.storage and hasattr(self.storage, 'bucket'):
@@ -1108,19 +1033,22 @@ class RAGSystem:
         dimensions = len(self.embeddings[0]) if self.embeddings else 0
         logger.info(f"🔍 벡터 DB 차원수: {dimensions}")
         
-        # 벡터 저장소 파일 크기
+        # Cloud Storage에서 벡터 저장소 파일 크기 확인
         db_size = 0
-        if self.storage:
-            vector_file = os.path.join(self.storage.local_dir, "vector_store.pkl")
-            if os.path.exists(vector_file):
-                db_size = os.path.getsize(vector_file)
+        if self.storage and hasattr(self.storage, 'bucket'):
+            try:
+                vector_blob = self.storage.bucket.blob('vector_store/vector_store.pkl')
+                if vector_blob.exists():
+                    db_size = vector_blob.size
+            except Exception as e:
+                logger.warning(f"⚠️ 벡터 저장소 파일 크기 확인 실패: {e}")
         
         return {
             'total_vectors': len(self.embeddings),
             'dimensions': dimensions,
             'db_size_mb': round(db_size / (1024**2), 2),
             'index_type': 'pickle',
-            'storage_path': self.storage.local_dir if self.storage else 'unknown'
+            'storage_path': 'Cloud Storage' if self.storage and hasattr(self.storage, 'bucket') else 'unknown'
         }
     
     def search_test(self, query: str) -> Dict[str, Any]:

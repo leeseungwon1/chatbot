@@ -20,7 +20,7 @@
 ### 🤖 AI 기능
 - **OpenAI API**: GPT-3.5-turbo 모델을 활용한 정확한 응답 생성
 - **텍스트 임베딩**: text-embedding-3-large 모델 사용
-- **로컬 벡터 저장소**: pickle 기반 벡터 DB로 빠른 검색
+- **Cloud Storage 벡터 저장소**: Google Cloud Storage 기반 벡터 DB로 안정적인 검색
 - **청크 기반**: 효율적인 문서 분할 및 처리
 
 ### 🎨 사용자 인터페이스
