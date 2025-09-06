@@ -32,8 +32,12 @@ class RAGSystem:
         if not self.openai_api_key:
             logger.warning("⚠️ OPENAI_API_KEY가 설정되지 않았습니다. 질의응답 기능은 사용할 수 없습니다.")
         else:
-            openai.api_key = self.openai_api_key
-            logger.info("✅ OpenAI API 키 설정 완료")
+            # 구버전 API 호환성을 위해 설정
+            try:
+                openai.api_key = self.openai_api_key
+                logger.info("✅ OpenAI API 키 설정 완료 (구버전 호환)")
+            except:
+                logger.info("✅ OpenAI API 키 설정 완료 (신버전)")
             
         logger.info("✅ RAG 시스템 초기화 완료")
     
@@ -194,21 +198,29 @@ class RAGSystem:
                 text = text[:8000]
                 logger.warning(f"⚠️ 텍스트가 너무 길어서 8000자로 자름")
             
-            response = openai.Embedding.create(
-                model=self.embedding_model,
-                input=text
-            )
-            
-            if response and 'data' in response and len(response['data']) > 0:
+            # OpenAI API 1.0.0+ 버전 호환
+            try:
+                # 새로운 API 방식 시도
+                from openai import OpenAI
+                client = OpenAI(api_key=self.openai_api_key)
+                response = client.embeddings.create(
+                    model=self.embedding_model,
+                    input=text
+                )
+                embedding = response.data[0].embedding
+            except ImportError:
+                # 구버전 API 방식 (fallback)
+                response = openai.Embedding.create(
+                    model=self.embedding_model,
+                    input=text
+                )
                 embedding = response['data'][0]['embedding']
-                if embedding and len(embedding) > 0:
-                    logger.debug(f"✅ 임베딩 생성 성공: {len(embedding)}차원")
-                    return embedding
-                else:
-                    logger.error("❌ 임베딩이 비어있음")
-                    return []
+            
+            if embedding and len(embedding) > 0:
+                logger.debug(f"✅ 임베딩 생성 성공: {len(embedding)}차원")
+                return embedding
             else:
-                logger.error("❌ API 응답이 비어있음")
+                logger.error("❌ 임베딩이 비어있음")
                 return []
                 
         except Exception as e:
@@ -610,17 +622,33 @@ class RAGSystem:
 
 답변:"""
             
-            response = openai.ChatCompletion.create(
-                model=self.llm_model,
-                messages=[
-                    {"role": "system", "content": "당신은 도움이 되는 AI 어시스턴트입니다. **중요: 오직 제공된 문서의 내용만을 사용하여 답변해주세요.** 외부 지식이나 일반적인 법률 지식을 사용하지 마세요. 사용자가 '전체 내용을 그대로 보여달라'고 요청하면, 해당 조항의 모든 내용을 빠짐없이 완전히 제공해주세요. 각 문서의 제목(파일명)을 주의 깊게 살펴보고, 해당 문서와 관련된 내용을 우선적으로 참고해주세요. 사용자가 '저장하고 있는 문서가 뭐지?', '파일명을 알려달라' 등의 질문을 하면, 참고 문서들에서 파일명(=== 파일명 === 형태)을 찾아서 정확히 알려주세요. **절대로 제공된 문서에 없는 조항, 법령, 규정을 언급하지 마세요.** 문서에 없는 내용은 추측하지 말고, 문서 내용과 이전 대화 맥락만을 바탕으로 답변해주세요. 만약 질문에 대한 답변이 제공된 문서에 없다면, '제공된 문서에는 해당 내용이 없습니다. 더 자세한 정보가 필요하시면 관련 문서를 업로드해주세요.'라고 답변해주세요."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=2000,
-                temperature=0.3
-            )
-            
-            answer = response.choices[0].message.content.strip()
+            # OpenAI API 1.0.0+ 버전 호환
+            try:
+                # 새로운 API 방식 시도
+                from openai import OpenAI
+                client = OpenAI(api_key=self.openai_api_key)
+                response = client.chat.completions.create(
+                    model=self.llm_model,
+                    messages=[
+                        {"role": "system", "content": "당신은 도움이 되는 AI 어시스턴트입니다. **중요: 오직 제공된 문서의 내용만을 사용하여 답변해주세요.** 외부 지식이나 일반적인 법률 지식을 사용하지 마세요. 사용자가 '전체 내용을 그대로 보여달라'고 요청하면, 해당 조항의 모든 내용을 빠짐없이 완전히 제공해주세요. 각 문서의 제목(파일명)을 주의 깊게 살펴보고, 해당 문서와 관련된 내용을 우선적으로 참고해주세요. 사용자가 '저장하고 있는 문서가 뭐지?', '파일명을 알려달라' 등의 질문을 하면, 참고 문서들에서 파일명(=== 파일명 === 형태)을 찾아서 정확히 알려주세요. **절대로 제공된 문서에 없는 조항, 법령, 규정을 언급하지 마세요.** 문서에 없는 내용은 추측하지 말고, 문서 내용과 이전 대화 맥락만을 바탕으로 답변해주세요. 만약 질문에 대한 답변이 제공된 문서에 없다면, '제공된 문서에는 해당 내용이 없습니다. 더 자세한 정보가 필요하시면 관련 문서를 업로드해주세요.'라고 답변해주세요."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=2000,
+                    temperature=0.3
+                )
+                answer = response.choices[0].message.content.strip()
+            except ImportError:
+                # 구버전 API 방식 (fallback)
+                response = openai.ChatCompletion.create(
+                    model=self.llm_model,
+                    messages=[
+                        {"role": "system", "content": "당신은 도움이 되는 AI 어시스턴트입니다. **중요: 오직 제공된 문서의 내용만을 사용하여 답변해주세요.** 외부 지식이나 일반적인 법률 지식을 사용하지 마세요. 사용자가 '전체 내용을 그대로 보여달라'고 요청하면, 해당 조항의 모든 내용을 빠짐없이 완전히 제공해주세요. 각 문서의 제목(파일명)을 주의 깊게 살펴보고, 해당 문서와 관련된 내용을 우선적으로 참고해주세요. 사용자가 '저장하고 있는 문서가 뭐지?', '파일명을 알려달라' 등의 질문을 하면, 참고 문서들에서 파일명(=== 파일명 === 형태)을 찾아서 정확히 알려주세요. **절대로 제공된 문서에 없는 조항, 법령, 규정을 언급하지 마세요.** 문서에 없는 내용은 추측하지 말고, 문서 내용과 이전 대화 맥락만을 바탕으로 답변해주세요. 만약 질문에 대한 답변이 제공된 문서에 없다면, '제공된 문서에는 해당 내용이 없습니다. 더 자세한 정보가 필요하시면 관련 문서를 업로드해주세요.'라고 답변해주세요."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=2000,
+                    temperature=0.3
+                )
+                answer = response.choices[0].message.content.strip()
             logger.info(f"✅ 질의응답 완료: {question[:50]}...")
             return answer
             
