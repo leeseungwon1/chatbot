@@ -66,16 +66,21 @@ class RAGSystem:
                                             try:
                                                 file_url = file_info.get('url')
                                                 original_name = file_info.get('name')  # 원본 파일명
+                                                stored_filename = file_info.get('filename')  # 저장된 파일명
                                                 
-                                                if file_url and original_name:
-                                                    logger.info(f"📄 자동 임베딩 시작: {original_name}")
-                                                    success = self.add_document(file_url, original_name)
+                                                if file_url and stored_filename:
+                                                    logger.info(f"📄 자동 임베딩 시작: {original_name} (저장된 파일명: {stored_filename})")
+                                                    success = self.add_document(file_url, stored_filename)
                                                     if success:
                                                         logger.info(f"✅ 자동 임베딩 완료: {original_name}")
                                                     else:
                                                         logger.error(f"❌ 자동 임베딩 실패: {original_name}")
+                                                else:
+                                                    logger.warning(f"⚠️ 파일 정보 불완전: {file_info}")
                                             except Exception as e:
                                                 logger.error(f"❌ 자동 임베딩 중 오류: {file_info.get('name', 'unknown')} - {e}")
+                                                import traceback
+                                                logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
                                     except Exception as e:
                                         logger.error(f"❌ 기존 파일 확인 중 오류: {e}")
                         else:
@@ -135,35 +140,82 @@ class RAGSystem:
     def _get_embedding(self, text: str) -> List[float]:
         """텍스트 임베딩 생성"""
         try:
+            if not text or not text.strip():
+                logger.warning("⚠️ 빈 텍스트로 임베딩 생성 시도")
+                return []
+            
+            # 텍스트 길이 제한 (OpenAI API 제한)
+            if len(text) > 8000:  # 안전 마진을 두고 8000자로 제한
+                text = text[:8000]
+                logger.warning(f"⚠️ 텍스트가 너무 길어서 8000자로 자름")
+            
             response = openai.Embedding.create(
                 model=self.embedding_model,
                 input=text
             )
-            return response['data'][0]['embedding']
+            
+            if response and 'data' in response and len(response['data']) > 0:
+                embedding = response['data'][0]['embedding']
+                if embedding and len(embedding) > 0:
+                    logger.debug(f"✅ 임베딩 생성 성공: {len(embedding)}차원")
+                    return embedding
+                else:
+                    logger.error("❌ 임베딩이 비어있음")
+                    return []
+            else:
+                logger.error("❌ API 응답이 비어있음")
+                return []
+                
         except Exception as e:
             logger.error(f"❌ 임베딩 생성 실패: {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
             return []
     
     def _split_text(self, text: str) -> List[str]:
         """텍스트를 청크로 분할 (안전한 버전)"""
         try:
-            # 기존 방식으로 안전하게 분할
+            if not text or not text.strip():
+                logger.warning("⚠️ 빈 텍스트로 분할 시도")
+                return []
+            
+            # 텍스트 정리
+            text = text.strip()
+            
+            # 텍스트가 청크 크기보다 작으면 그대로 반환
+            if len(text) <= self.chunk_size:
+                return [text]
+            
             chunks = []
             start = 0
             
             while start < len(text):
                 end = start + self.chunk_size
                 chunk = text[start:end]
-                chunks.append(chunk)
+                
+                # 청크가 비어있지 않은 경우만 추가
+                if chunk.strip():
+                    chunks.append(chunk)
+                
                 start = end - self.chunk_overlap
                 if start >= len(text):
                     break
                     
+            # 빈 청크 제거
+            chunks = [chunk for chunk in chunks if chunk.strip()]
+            
+            logger.info(f"📝 텍스트 분할 완료: {len(chunks)}개 청크 (원본 길이: {len(text)}자)")
             return chunks
+            
         except Exception as e:
             logger.error(f"❌ 텍스트 분할 실패: {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
             # 오류 시 기본 분할
-            return [text[i:i+self.chunk_size] for i in range(0, len(text), self.chunk_size)]
+            try:
+                return [text[i:i+self.chunk_size] for i in range(0, len(text), self.chunk_size) if text[i:i+self.chunk_size].strip()]
+            except:
+                return [text] if text.strip() else []
     
     def add_document(self, file_url: str, filename: str) -> bool:
         """문서 추가"""
@@ -201,13 +253,28 @@ class RAGSystem:
                             actual_filename = original_name
                         logger.info(f"📄 원본 파일명 사용: {actual_filename}")
                     else:
-                        # 메타데이터가 없으면 확장자만 제거
-                        if '.' in stored_filename:
-                            actual_filename = stored_filename.rsplit('.', 1)[0]
-                        logger.info(f"📄 저장된 파일명 사용 (확장자 제거): {actual_filename}")
+                        # 메타데이터가 없으면 저장된 파일명에서 타임스탬프 제거 후 확장자 제거
+                        if '_' in stored_filename:
+                            # 타임스탬프_파일명 형식에서 파일명 부분만 추출
+                            parts = stored_filename.split('_', 1)
+                            if len(parts) > 1:
+                                actual_filename = parts[1]
+                        else:
+                            actual_filename = stored_filename
+                        
+                        # 확장자 제거
+                        if '.' in actual_filename:
+                            actual_filename = actual_filename.rsplit('.', 1)[0]
+                        logger.info(f"📄 저장된 파일명 사용 (타임스탬프 및 확장자 제거): {actual_filename}")
             except Exception as e:
                 logger.warning(f"⚠️ 파일명 추출 실패, 원본 사용: {e}")
                 actual_filename = stored_filename
+                # 타임스탬프 제거 시도
+                if '_' in actual_filename:
+                    parts = actual_filename.split('_', 1)
+                    if len(parts) > 1:
+                        actual_filename = parts[1]
+                # 확장자 제거
                 if '.' in actual_filename:
                     actual_filename = actual_filename.rsplit('.', 1)[0]
             
@@ -278,8 +345,15 @@ class RAGSystem:
     def _load_document(self, file_url: str, filename: str) -> Optional[str]:
         """문서 로드"""
         try:
-            # 파일 확장자 확인
-            file_ext = filename.lower().split('.')[-1]
+            # 파일 확장자 확인 (더 안전한 방식)
+            if '.' in filename:
+                file_ext = filename.lower().split('.')[-1]
+            else:
+                # 확장자가 없는 경우 URL에서 추출 시도
+                if '.' in file_url:
+                    file_ext = file_url.lower().split('.')[-1]
+                else:
+                    file_ext = 'txt'  # 기본값
             
             logger.info(f"📖 문서 로드 시작: {filename} (확장자: {file_ext})")
             
