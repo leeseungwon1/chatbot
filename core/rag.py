@@ -336,15 +336,19 @@ class RAGSystem:
                     actual_filename = actual_filename.rsplit('.', 1)[0]
             
             logger.info(f"📄 문서 추가 시작: {actual_filename} (저장된 파일명: {stored_filename})")
+            logger.info(f"📄 파일 URL: {file_url}")
             
             # 기존 임베딩이 있다면 제거
             self.remove_document(actual_filename)
             
             # 문서 로드
+            logger.info(f"📖 문서 로드 시도: {stored_filename}")
             content = self._load_document(file_url, stored_filename)
             if not content:
                 logger.error(f"❌ 문서 로드 실패: {stored_filename}")
                 return False
+            
+            logger.info(f"✅ 문서 로드 성공: {len(content)} 문자")
             
             # 텍스트 분할
             chunks = self._split_text(content)
@@ -403,21 +407,41 @@ class RAGSystem:
         """문서 로드"""
         try:
             # 파일 확장자 확인 (더 안전한 방식)
+            file_ext = None
+            
+            # 1. 파일명에서 확장자 추출
             if '.' in filename:
                 file_ext = filename.lower().split('.')[-1]
-            else:
-                # 확장자가 없는 경우 URL에서 추출 시도
-                if '.' in file_url:
-                    file_ext = file_url.lower().split('.')[-1]
+                logger.info(f"📄 파일명에서 확장자 추출: {file_ext}")
+            
+            # 2. 파일명에 확장자가 없는 경우 URL에서 추출
+            if not file_ext and '.' in file_url:
+                file_ext = file_url.lower().split('.')[-1]
+                logger.info(f"📄 URL에서 확장자 추출: {file_ext}")
+            
+            # 3. 여전히 확장자가 없는 경우 파일명 패턴으로 추정
+            if not file_ext:
+                if 'pdf' in filename.lower():
+                    file_ext = 'pdf'
+                elif 'docx' in filename.lower() or 'doc' in filename.lower():
+                    file_ext = 'docx'
+                elif 'txt' in filename.lower():
+                    file_ext = 'txt'
                 else:
                     file_ext = 'txt'  # 기본값
+                logger.info(f"📄 파일명 패턴으로 확장자 추정: {file_ext}")
+            
+            logger.info(f"📄 최종 확장자: {file_ext}")
             
             logger.info(f"📖 문서 로드 시작: {filename} (확장자: {file_ext})")
             
             # 임시 파일로 다운로드
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}") as temp_file:
+                logger.info(f"📥 파일 다운로드 시작: {file_url}")
+                
                 if file_url.startswith('local://'):
                     # 로컬 파일에서 다운로드
+                    logger.info(f"📁 로컬 파일 다운로드 시도: {filename}")
                     if self.storage:
                         content = self.storage.download_file(filename)
                         if content:
@@ -425,12 +449,21 @@ class RAGSystem:
                             logger.info(f"✅ 로컬 파일에서 다운로드: {len(content)} bytes")
                         else:
                             raise ValueError(f"로컬 파일을 읽을 수 없습니다: {filename}")
+                    else:
+                        raise ValueError("로컬 스토리지가 설정되지 않았습니다")
                 elif file_url.startswith('gs://'):
                     # Google Cloud Storage URL에서 다운로드
+                    logger.info(f"☁️ Cloud Storage 다운로드 시도: {file_url}")
                     if self.storage and hasattr(self.storage, 'bucket'):
                         # Cloud Storage 클라이언트 사용
                         blob_name = file_url.replace(f"gs://{self.storage.bucket_name}/", "")
+                        logger.info(f"📄 Blob 이름: {blob_name}")
                         blob = self.storage.bucket.blob(blob_name)
+                        
+                        if not blob.exists():
+                            logger.error(f"❌ Blob이 존재하지 않음: {blob_name}")
+                            raise FileNotFoundError(f"파일을 찾을 수 없습니다: {blob_name}")
+                        
                         content = blob.download_as_bytes()
                         temp_file.write(content)
                         logger.info(f"✅ Cloud Storage에서 다운로드: {len(content)} bytes")
@@ -438,12 +471,14 @@ class RAGSystem:
                         raise ValueError("Cloud Storage 클라이언트가 설정되지 않았습니다")
                 else:
                     # HTTP URL에서 다운로드
+                    logger.info(f"🌐 HTTP URL 다운로드 시도: {file_url}")
                     response = requests.get(file_url)
                     response.raise_for_status()
                     temp_file.write(response.content)
                     logger.info(f"✅ HTTP URL에서 다운로드: {len(response.content)} bytes")
                 
                 temp_file_path = temp_file.name
+                logger.info(f"📄 임시 파일 경로: {temp_file_path}")
             
             # 파일 내용 읽기
             if file_ext == 'pdf':

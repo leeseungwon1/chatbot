@@ -699,6 +699,8 @@ def force_sync_embeddings():
                 stored_filename = file_info.get('filename')
                 has_embedding = file_info.get('has_embedding', False)
                 
+                logger.info(f"📄 파일 정보: {original_name} -> {stored_filename} (URL: {file_url}, 임베딩: {has_embedding})")
+                
                 if file_url and stored_filename:
                     if not has_embedding:
                         logger.info(f"📄 강제 임베딩 시작: {original_name}")
@@ -730,6 +732,37 @@ def force_sync_embeddings():
     except Exception as e:
         logger.error(f"❌ 강제 동기화 실패: {e}")
         return jsonify({'error': f'강제 동기화에 실패했습니다: {str(e)}'}), 500
+
+@app.route('/api/admin/debug-files', methods=['GET'])
+@admin_required
+def debug_files():
+    """파일 정보 디버깅용 API"""
+    try:
+        if not storage:
+            return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
+        
+        files = storage.list_files()
+        debug_info = []
+        
+        for file_info in files:
+            debug_info.append({
+                'name': file_info.get('name'),
+                'filename': file_info.get('filename'),
+                'url': file_info.get('url'),
+                'has_embedding': file_info.get('has_embedding', False),
+                'size': file_info.get('size', 0),
+                'uploaded_at': file_info.get('uploaded_at', '')
+            })
+        
+        return jsonify({
+            'total_files': len(files),
+            'files': debug_info,
+            'rag_status': rag_system.get_status() if rag_system else {}
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ 파일 디버깅 실패: {e}")
+        return jsonify({'error': f'파일 디버깅에 실패했습니다: {str(e)}'}), 500
 
 # 새로운 관리자 API 엔드포인트들
 @app.route('/api/admin/system-status')
