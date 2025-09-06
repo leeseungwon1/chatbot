@@ -202,13 +202,36 @@ class RAGSystem:
             try:
                 # 새로운 API 방식 시도
                 from openai import OpenAI
-                client = OpenAI(api_key=self.openai_api_key)
-                response = client.embeddings.create(
+                # 환경 변수에서 프록시 설정 제거하고 클라이언트 생성
+                import os
+                # 프록시 관련 환경 변수 임시 제거
+                old_proxy_vars = {}
+                proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+                for var in proxy_vars:
+                    if var in os.environ:
+                        old_proxy_vars[var] = os.environ[var]
+                        del os.environ[var]
+                
+                try:
+                    client = OpenAI(api_key=self.openai_api_key)
+                    response = client.embeddings.create(
+                        model=self.embedding_model,
+                        input=text
+                    )
+                    embedding = response.data[0].embedding
+                finally:
+                    # 환경 변수 복원
+                    for var, value in old_proxy_vars.items():
+                        os.environ[var] = value
+            except ImportError:
+                # 구버전 API 방식 (fallback)
+                response = openai.Embedding.create(
                     model=self.embedding_model,
                     input=text
                 )
-                embedding = response.data[0].embedding
-            except ImportError:
+                embedding = response['data'][0]['embedding']
+            except Exception as client_error:
+                logger.warning(f"⚠️ 새로운 API 방식 실패, 구버전 시도: {client_error}")
                 # 구버전 API 방식 (fallback)
                 response = openai.Embedding.create(
                     model=self.embedding_model,
@@ -661,8 +684,35 @@ class RAGSystem:
             try:
                 # 새로운 API 방식 시도
                 from openai import OpenAI
-                client = OpenAI(api_key=self.openai_api_key)
-                response = client.chat.completions.create(
+                # 환경 변수에서 프록시 설정 제거하고 클라이언트 생성
+                import os
+                # 프록시 관련 환경 변수 임시 제거
+                old_proxy_vars = {}
+                proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+                for var in proxy_vars:
+                    if var in os.environ:
+                        old_proxy_vars[var] = os.environ[var]
+                        del os.environ[var]
+                
+                try:
+                    client = OpenAI(api_key=self.openai_api_key)
+                    response = client.chat.completions.create(
+                        model=self.llm_model,
+                        messages=[
+                            {"role": "system", "content": "당신은 도움이 되는 AI 어시스턴트입니다. **중요: 오직 제공된 문서의 내용만을 사용하여 답변해주세요.** 외부 지식이나 일반적인 법률 지식을 사용하지 마세요. 사용자가 '전체 내용을 그대로 보여달라'고 요청하면, 해당 조항의 모든 내용을 빠짐없이 완전히 제공해주세요. 각 문서의 제목(파일명)을 주의 깊게 살펴보고, 해당 문서와 관련된 내용을 우선적으로 참고해주세요. 사용자가 '저장하고 있는 문서가 뭐지?', '파일명을 알려달라' 등의 질문을 하면, 참고 문서들에서 파일명(=== 파일명 === 형태)을 찾아서 정확히 알려주세요. **절대로 제공된 문서에 없는 조항, 법령, 규정을 언급하지 마세요.** 문서에 없는 내용은 추측하지 말고, 문서 내용과 이전 대화 맥락만을 바탕으로 답변해주세요. 만약 질문에 대한 답변이 제공된 문서에 없다면, '제공된 문서에는 해당 내용이 없습니다. 더 자세한 정보가 필요하시면 관련 문서를 업로드해주세요.'라고 답변해주세요."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        max_tokens=2000,
+                        temperature=0.3
+                    )
+                    answer = response.choices[0].message.content.strip()
+                finally:
+                    # 환경 변수 복원
+                    for var, value in old_proxy_vars.items():
+                        os.environ[var] = value
+            except ImportError:
+                # 구버전 API 방식 (fallback)
+                response = openai.ChatCompletion.create(
                     model=self.llm_model,
                     messages=[
                         {"role": "system", "content": "당신은 도움이 되는 AI 어시스턴트입니다. **중요: 오직 제공된 문서의 내용만을 사용하여 답변해주세요.** 외부 지식이나 일반적인 법률 지식을 사용하지 마세요. 사용자가 '전체 내용을 그대로 보여달라'고 요청하면, 해당 조항의 모든 내용을 빠짐없이 완전히 제공해주세요. 각 문서의 제목(파일명)을 주의 깊게 살펴보고, 해당 문서와 관련된 내용을 우선적으로 참고해주세요. 사용자가 '저장하고 있는 문서가 뭐지?', '파일명을 알려달라' 등의 질문을 하면, 참고 문서들에서 파일명(=== 파일명 === 형태)을 찾아서 정확히 알려주세요. **절대로 제공된 문서에 없는 조항, 법령, 규정을 언급하지 마세요.** 문서에 없는 내용은 추측하지 말고, 문서 내용과 이전 대화 맥락만을 바탕으로 답변해주세요. 만약 질문에 대한 답변이 제공된 문서에 없다면, '제공된 문서에는 해당 내용이 없습니다. 더 자세한 정보가 필요하시면 관련 문서를 업로드해주세요.'라고 답변해주세요."},
@@ -672,7 +722,8 @@ class RAGSystem:
                     temperature=0.3
                 )
                 answer = response.choices[0].message.content.strip()
-            except ImportError:
+            except Exception as client_error:
+                logger.warning(f"⚠️ 새로운 API 방식 실패, 구버전 시도: {client_error}")
                 # 구버전 API 방식 (fallback)
                 response = openai.ChatCompletion.create(
                     model=self.llm_model,
