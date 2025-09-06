@@ -554,6 +554,13 @@ def rebuild_embeddings():
                 failed_count += 1
                 continue
         
+        # 벡터 저장소 강제 저장
+        try:
+            rag_system._save_vector_store()
+            logger.info("✅ 전체 임베딩 후 벡터 저장소 강제 저장 완료")
+        except Exception as save_error:
+            logger.error(f"❌ 벡터 저장소 강제 저장 실패: {save_error}")
+        
         logger.info(f"✅ 전체 임베딩 재구성 완료: {embedded_count}개 파일")
         return jsonify({
             'message': f'{embedded_count}개 파일의 임베딩이 재구성되었습니다.',
@@ -594,14 +601,7 @@ def embed_selected_files():
                     file_url = file_info['url']
                     display_name = file_info.get('name', filename)
                     
-                    # 기존 임베딩 제거 (있다면)
-                    try:
-                        rag_system.remove_document(display_name)
-                        logger.info(f"✅ 기존 임베딩 제거 완료: {display_name}")
-                    except Exception as remove_error:
-                        logger.warning(f"⚠️ 기존 임베딩 제거 실패: {display_name} - {remove_error}")
-                    
-                    # 새로 임베딩
+                    # 새로 임베딩 (기존 임베딩은 자동으로 덮어쓰기됨)
                     success = rag_system.add_document(file_url, filename)
                     if success:
                         logger.info(f"✅ 선택 임베딩 완료: {display_name}")
@@ -625,6 +625,13 @@ def embed_selected_files():
                 logger.error(f"❌ 선택 임베딩 실패: {filename} - {e}")
                 failed_files.append(filename)
                 continue
+        
+        # 벡터 저장소 강제 저장
+        try:
+            rag_system._save_vector_store()
+            logger.info("✅ 선택 임베딩 후 벡터 저장소 강제 저장 완료")
+        except Exception as save_error:
+            logger.error(f"❌ 벡터 저장소 강제 저장 실패: {save_error}")
         
         logger.info(f"✅ 선택 임베딩 완료: {embedded_count}개 성공, {len(failed_files)}개 실패")
         return jsonify({

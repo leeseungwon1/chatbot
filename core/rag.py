@@ -189,6 +189,34 @@ class RAGSystem:
             import traceback
             logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
     
+    def _remove_existing_document(self, filename: str):
+        """기존 문서가 있다면 제거 (중복 방지)"""
+        try:
+            # 같은 파일명의 문서들을 찾아서 제거
+            indices_to_remove = []
+            for i, doc in enumerate(self.documents):
+                if doc.get('filename') == filename or doc.get('stored_filename') == filename:
+                    indices_to_remove.append(i)
+            
+            if indices_to_remove:
+                logger.info(f"🗑️ 기존 문서 제거: {filename} ({len(indices_to_remove)}개 청크)")
+                
+                # 역순으로 제거 (인덱스가 변경되지 않도록)
+                for i in reversed(indices_to_remove):
+                    # vector_store에서도 제거
+                    chunk_id = self.documents[i].get('chunk_id', i)
+                    vector_key = f"{filename}_{chunk_id}"
+                    if vector_key in self.vector_store:
+                        del self.vector_store[vector_key]
+                    
+                    # documents와 embeddings에서 제거
+                    del self.documents[i]
+                    del self.embeddings[i]
+                
+                logger.info(f"✅ 기존 문서 제거 완료: {filename}")
+        except Exception as e:
+            logger.warning(f"⚠️ 기존 문서 제거 중 오류: {e}")
+    
     def _save_vector_store(self):
         """벡터 저장소 저장"""
         try:
@@ -199,19 +227,34 @@ class RAGSystem:
                     'vector_store': self.vector_store
                 }
                 
+                logger.info(f"🔍 벡터 저장소 저장 시작: 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개")
+                
                 # Cloud Storage 전용
                 if hasattr(self.storage, 'bucket'):
                     try:
                         vector_blob = self.storage.bucket.blob("vector_store/vector_store.pkl")
                         vector_data = pickle.dumps(data)
                         vector_blob.upload_from_string(vector_data, content_type='application/octet-stream')
-                        logger.info("✅ Cloud Storage에 벡터 저장소 저장 완료")
+                        logger.info(f"✅ Cloud Storage에 벡터 저장소 저장 완료: {len(vector_data)} bytes")
+                        
+                        # 저장 후 확인
+                        if vector_blob.exists():
+                            logger.info("✅ 벡터 저장소 파일 존재 확인 완료")
+                        else:
+                            logger.error("❌ 벡터 저장소 파일 저장 후 존재하지 않음")
+                            
                     except Exception as e:
                         logger.error(f"❌ Cloud Storage 벡터 저장소 저장 실패: {e}")
+                        import traceback
+                        logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
                 else:
                     logger.error("❌ Cloud Storage가 초기화되지 않았습니다")
+            else:
+                logger.error("❌ 스토리지가 초기화되지 않았습니다")
         except Exception as e:
             logger.error(f"❌ 벡터 저장소 저장 실패: {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
     
     def _delete_vector_store(self):
         """벡터 저장소 파일 삭제 (Cloud Storage 전용)"""
@@ -384,6 +427,9 @@ class RAGSystem:
         try:
             logger.info(f"🔍 문서 추가 시작: {filename} (URL: {file_url})")
             logger.info(f"🔍 현재 상태: 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개")
+            
+            # 기존에 같은 파일이 임베딩되어 있다면 제거
+            self._remove_existing_document(filename)
             
             if not self.storage:
                 logger.error("❌ 스토리지가 초기화되지 않았습니다")
@@ -1018,7 +1064,7 @@ class RAGSystem:
     
     def get_vector_db_info(self) -> Dict[str, Any]:
         """벡터 DB 상세 정보 반환"""
-        logger.info(f"🔍 벡터 DB 정보 조회: 임베딩 {len(self.embeddings)}개")
+        logger.info(f"🔍 벡터 DB 정보 조회: 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개")
         
         if not self.embeddings:
             logger.info("🔍 벡터 DB가 비어있음")
@@ -1026,7 +1072,8 @@ class RAGSystem:
                 'total_vectors': 0,
                 'dimensions': 0,
                 'db_size_mb': 0,
-                'index_type': 'empty'
+                'index_type': 'empty',
+                'storage_path': 'Cloud Storage' if self.storage and hasattr(self.storage, 'bucket') else 'unknown'
             }
         
         # 첫 번째 임베딩의 차원 수 확인
@@ -1035,21 +1082,30 @@ class RAGSystem:
         
         # Cloud Storage에서 벡터 저장소 파일 크기 확인
         db_size = 0
+        file_exists = False
         if self.storage and hasattr(self.storage, 'bucket'):
             try:
                 vector_blob = self.storage.bucket.blob('vector_store/vector_store.pkl')
-                if vector_blob.exists():
+                file_exists = vector_blob.exists()
+                if file_exists:
                     db_size = vector_blob.size
+                    logger.info(f"🔍 Cloud Storage 벡터 파일 크기: {db_size} bytes")
+                else:
+                    logger.warning("⚠️ Cloud Storage에 벡터 파일이 존재하지 않음")
             except Exception as e:
                 logger.warning(f"⚠️ 벡터 저장소 파일 크기 확인 실패: {e}")
         
-        return {
+        result = {
             'total_vectors': len(self.embeddings),
             'dimensions': dimensions,
             'db_size_mb': round(db_size / (1024**2), 2),
             'index_type': 'pickle',
-            'storage_path': 'Cloud Storage' if self.storage and hasattr(self.storage, 'bucket') else 'unknown'
+            'storage_path': 'Cloud Storage' if self.storage and hasattr(self.storage, 'bucket') else 'unknown',
+            'file_exists': file_exists
         }
+        
+        logger.info(f"🔍 벡터 DB 정보 반환: {result}")
+        return result
     
     def search_test(self, query: str) -> Dict[str, Any]:
         """검색 테스트 실행"""
