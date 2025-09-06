@@ -789,6 +789,8 @@ def get_system_status():
         rag_status = rag_system.get_status() if rag_system else {}
         storage_info = storage.get_storage_info() if storage else {}
         
+        logger.info(f"🔍 시스템 상태 조회: RAG 문서 {rag_status.get('total_documents', 0)}개, 임베딩 {rag_status.get('total_embeddings', 0)}개")
+        
         # API 응답 속도 측정
         start_time = time.time()
         # 간단한 테스트 쿼리 실행

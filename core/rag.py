@@ -137,6 +137,7 @@ class RAGSystem:
                             self.vector_store = data.get('vector_store', {})
                             embedding_dim = len(self.embeddings[0]) if self.embeddings else 0
                             logger.info(f"✅ Cloud Storage에서 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩 (차원: {embedding_dim})")
+                            logger.info(f"🔍 로드된 문서 목록: {[doc.get('filename', 'unknown') for doc in self.documents[:5]]}")
                             
                             # 스토리지와 벡터 저장소 동기화
                             if self.storage:
@@ -193,6 +194,7 @@ class RAGSystem:
                             self.vector_store = data.get('vector_store', {})
                         embedding_dim = len(self.embeddings[0]) if self.embeddings else 0
                         logger.info(f"✅ 로컬 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩 (차원: {embedding_dim})")
+                        logger.info(f"🔍 로드된 문서 목록: {[doc.get('filename', 'unknown') for doc in self.documents[:5]]}")
                         
                         # 스토리지와 벡터 저장소 동기화
                         if self.storage:
@@ -277,14 +279,20 @@ class RAGSystem:
                 if vector_blob.exists():
                     vector_blob.delete()
                     logger.info("✅ Cloud Storage에서 벡터 저장소 파일 삭제 완료")
+                else:
+                    logger.info("ℹ️ Cloud Storage에 벡터 저장소 파일이 존재하지 않음")
             else:
                 # 로컬에서 벡터 저장소 파일 삭제
                 vector_file = 'local_storage/vector_store.pkl'
                 if os.path.exists(vector_file):
                     os.remove(vector_file)
                     logger.info("✅ 로컬 벡터 저장소 파일 삭제 완료")
+                else:
+                    logger.info("ℹ️ 로컬에 벡터 저장소 파일이 존재하지 않음")
         except Exception as e:
             logger.error(f"❌ 벡터 저장소 파일 삭제 실패: {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
     
     def _get_embedding(self, text: str) -> List[float]:
         """텍스트 임베딩 생성"""
@@ -437,6 +445,9 @@ class RAGSystem:
     def add_document(self, file_url: str, filename: str) -> bool:
         """문서 추가"""
         try:
+            logger.info(f"🔍 문서 추가 시작: {filename} (URL: {file_url})")
+            logger.info(f"🔍 현재 상태: 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개")
+            
             if not self.storage:
                 logger.error("❌ 스토리지가 초기화되지 않았습니다")
                 return False
@@ -555,6 +566,7 @@ class RAGSystem:
                 logger.warning(f"⚠️ 임베딩 상태 업데이트 실패: {e}")
             
             logger.info(f"✅ 문서 추가 완료: {actual_filename} ({successful_embeddings}/{len(chunks)}개 청크 성공)")
+            logger.info(f"🔍 추가 후 상태: 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개")
             return True
             
         except Exception as e:
@@ -1067,7 +1079,7 @@ class RAGSystem:
     
     def get_status(self) -> Dict[str, Any]:
         """RAG 시스템 상태 반환"""
-        return {
+        status = {
             'total_documents': len(self.documents),
             'total_embeddings': len(self.embeddings),
             'embedding_model': self.embedding_model,
@@ -1076,10 +1088,15 @@ class RAGSystem:
             'chunk_overlap': self.chunk_overlap,
             'is_initialized': self.openai_api_key is not None
         }
+        logger.info(f"🔍 RAG 상태 조회: 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개, 모델 {self.embedding_model}")
+        return status
     
     def get_vector_db_info(self) -> Dict[str, Any]:
         """벡터 DB 상세 정보 반환"""
+        logger.info(f"🔍 벡터 DB 정보 조회: 임베딩 {len(self.embeddings)}개")
+        
         if not self.embeddings:
+            logger.info("🔍 벡터 DB가 비어있음")
             return {
                 'total_vectors': 0,
                 'dimensions': 0,
@@ -1089,6 +1106,7 @@ class RAGSystem:
         
         # 첫 번째 임베딩의 차원 수 확인
         dimensions = len(self.embeddings[0]) if self.embeddings else 0
+        logger.info(f"🔍 벡터 DB 차원수: {dimensions}")
         
         # 벡터 저장소 파일 크기
         db_size = 0
