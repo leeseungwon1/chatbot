@@ -135,7 +135,8 @@ class RAGSystem:
                             self.documents = data.get('documents', [])
                             self.embeddings = data.get('embeddings', [])
                             self.vector_store = data.get('vector_store', {})
-                            logger.info(f"✅ Cloud Storage에서 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩")
+                            embedding_dim = len(self.embeddings[0]) if self.embeddings else 0
+                            logger.info(f"✅ Cloud Storage에서 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩 (차원: {embedding_dim})")
                             
                             # 스토리지와 벡터 저장소 동기화
                             if self.storage:
@@ -190,7 +191,8 @@ class RAGSystem:
                             self.documents = data.get('documents', [])
                             self.embeddings = data.get('embeddings', [])
                             self.vector_store = data.get('vector_store', {})
-                        logger.info(f"✅ 로컬 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩")
+                        embedding_dim = len(self.embeddings[0]) if self.embeddings else 0
+                        logger.info(f"✅ 로컬 벡터 저장소 로드 완료: {len(self.documents)}개 문서, {len(self.embeddings)}개 임베딩 (차원: {embedding_dim})")
                         
                         # 스토리지와 벡터 저장소 동기화
                         if self.storage:
@@ -265,6 +267,24 @@ class RAGSystem:
                     logger.info("✅ 로컬 벡터 저장소 저장 완료")
         except Exception as e:
             logger.error(f"❌ 벡터 저장소 저장 실패: {e}")
+    
+    def _delete_vector_store(self):
+        """벡터 저장소 파일 삭제"""
+        try:
+            if self.storage and hasattr(self.storage, 'bucket'):
+                # Cloud Storage에서 벡터 저장소 파일 삭제
+                vector_blob = self.storage.bucket.blob('vector_store.pkl')
+                if vector_blob.exists():
+                    vector_blob.delete()
+                    logger.info("✅ Cloud Storage에서 벡터 저장소 파일 삭제 완료")
+            else:
+                # 로컬에서 벡터 저장소 파일 삭제
+                vector_file = 'local_storage/vector_store.pkl'
+                if os.path.exists(vector_file):
+                    os.remove(vector_file)
+                    logger.info("✅ 로컬 벡터 저장소 파일 삭제 완료")
+        except Exception as e:
+            logger.error(f"❌ 벡터 저장소 파일 삭제 실패: {e}")
     
     def _get_embedding(self, text: str) -> List[float]:
         """텍스트 임베딩 생성"""
@@ -357,7 +377,7 @@ class RAGSystem:
                 raise Exception(f"OpenAI API 호출 실패: {client_error}")
             
             if embedding and len(embedding) > 0:
-                logger.debug(f"✅ 임베딩 생성 성공: {len(embedding)}차원")
+                logger.info(f"✅ 임베딩 생성 성공: {len(embedding)}차원 (모델: {self.embedding_model})")
                 return embedding
             else:
                 logger.error("❌ 임베딩이 비어있음")
@@ -948,33 +968,19 @@ class RAGSystem:
             return "파일명 정보를 가져오는 중 오류가 발생했습니다."
     
     def remove_document(self, filename: str) -> bool:
-        """문서 제거"""
+        """문서 제거 - 벡터 저장소 일관성 유지를 위해 전체 삭제"""
         try:
-            # 해당 파일의 모든 청크 제거
-            indices_to_remove = []
-            for i, doc in enumerate(self.documents):
-                # 원본 파일명 또는 저장된 파일명으로 매칭
-                if doc['filename'] == filename or doc.get('stored_filename') == filename:
-                    indices_to_remove.append(i)
+            logger.info(f"🗑️ 문서 제거 시작: {filename}")
             
-            if not indices_to_remove:
-                logger.info(f"ℹ️ 제거할 문서가 없음: {filename}")
-                return True  # 이미 제거된 상태이므로 성공으로 처리
+            # 벡터 저장소 일관성 유지를 위해 전체 삭제
+            # (개별 문서 제거 시에도 전체 임베딩을 다시 생성해야 함)
+            logger.info("🗑️ 벡터 저장소 일관성 유지를 위해 전체 벡터 저장소 삭제")
+            self._delete_vector_store()
             
-            logger.info(f"🗑️ 문서 제거 시작: {filename} ({len(indices_to_remove)}개 청크)")
-            
-            # 역순으로 제거 (인덱스 변화 방지)
-            for i in reversed(indices_to_remove):
-                del self.documents[i]
-                del self.embeddings[i]
-            
-            # 벡터 저장소 업데이트
+            # 메모리에서도 초기화
+            self.documents = []
+            self.embeddings = []
             self.vector_store = {}
-            for i, doc in enumerate(self.documents):
-                self.vector_store[f"{doc['filename']}_{doc['chunk_id']}"] = self.embeddings[i]
-            
-            # 저장
-            self._save_vector_store()
             
             # 스토리지에 임베딩 상태 업데이트
             try:
@@ -984,7 +990,7 @@ class RAGSystem:
             except Exception as e:
                 logger.warning(f"⚠️ 임베딩 상태 업데이트 실패: {e}")
             
-            logger.info(f"✅ 문서 제거 완료: {filename} ({len(indices_to_remove)}개 청크)")
+            logger.info(f"✅ 문서 제거 완료: {filename} (전체 벡터 저장소 삭제됨)")
             return True
             
         except Exception as e:
@@ -1034,8 +1040,8 @@ class RAGSystem:
             self.embeddings = []
             self.vector_store = {}
             
-            # 저장
-            self._save_vector_store()
+            # 벡터 저장소 파일 삭제
+            self._delete_vector_store()
             
             # 스토리지의 모든 파일 임베딩 상태를 False로 변경
             if self.storage:

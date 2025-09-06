@@ -379,31 +379,35 @@ def delete_file(filename):
         import urllib.parse
         decoded_filename = urllib.parse.unquote(filename)
         
-        # 파일 삭제
-        success = storage.delete_file(decoded_filename)
-        if not success:
-            return jsonify({'error': '파일을 찾을 수 없거나 삭제할 수 없습니다.'}), 404
-        
-        # RAG 시스템에서 문서 제거
+        # 먼저 RAG 시스템에서 문서 제거 (파일이 삭제되기 전에)
         if rag_system:
             try:
                 # 저장된 파일 목록에서 해당 파일의 원본 이름 찾기
                 files = storage.list_files()
+                original_name = None
                 for file_info in files:
                     if file_info['filename'] == decoded_filename:
-                        # 원본 파일명으로 제거 시도
-                        success = rag_system.remove_document(file_info['name'])
-                        if success:
-                            logger.info(f"✅ RAG 시스템에서 문서 제거 완료: {file_info['name']}")
-                        else:
-                            logger.warning(f"⚠️ RAG 시스템에서 문서 제거 실패: {file_info['name']}")
+                        original_name = file_info['name']
                         break
+                
+                if original_name:
+                    # 원본 파일명으로 제거 시도
+                    success = rag_system.remove_document(original_name)
+                    if success:
+                        logger.info(f"✅ RAG 시스템에서 문서 제거 완료: {original_name}")
+                    else:
+                        logger.warning(f"⚠️ RAG 시스템에서 문서 제거 실패: {original_name}")
                 else:
                     # 파일 목록에서 찾지 못한 경우, 디코딩된 파일명으로 직접 제거 시도
                     logger.info(f"ℹ️ 파일 목록에서 찾지 못함, 직접 제거 시도: {decoded_filename}")
                     rag_system.remove_document(decoded_filename)
             except Exception as e:
                 logger.error(f"❌ RAG 시스템에서 문서 제거 중 오류: {e}")
+        
+        # 그 다음 스토리지에서 파일 삭제
+        success = storage.delete_file(decoded_filename)
+        if not success:
+            return jsonify({'error': '파일을 찾을 수 없거나 삭제할 수 없습니다.'}), 404
         
         return jsonify({'message': '파일이 삭제되었습니다.'})
         
@@ -441,29 +445,33 @@ def batch_delete_files():
         if not filenames:
             return jsonify({'error': '삭제할 파일이 선택되지 않았습니다.'}), 400
         
-        # 파일 삭제
-        results = storage.delete_multiple_files(filenames)
-        
-        # RAG 시스템에서 문서 제거
+        # 먼저 RAG 시스템에서 문서 제거 (파일이 삭제되기 전에)
         if rag_system:
             for filename in filenames:
                 try:
                     # 저장된 파일 목록에서 해당 파일의 원본 이름 찾기
                     files = storage.list_files()
+                    original_name = None
                     for file_info in files:
                         if file_info['filename'] == filename:
-                            success = rag_system.remove_document(file_info['name'])
-                            if success:
-                                logger.info(f"✅ RAG 시스템에서 문서 제거 완료: {file_info['name']}")
-                            else:
-                                logger.warning(f"⚠️ RAG 시스템에서 문서 제거 실패: {file_info['name']}")
+                            original_name = file_info['name']
                             break
+                    
+                    if original_name:
+                        success = rag_system.remove_document(original_name)
+                        if success:
+                            logger.info(f"✅ RAG 시스템에서 문서 제거 완료: {original_name}")
+                        else:
+                            logger.warning(f"⚠️ RAG 시스템에서 문서 제거 실패: {original_name}")
                     else:
                         # 파일 목록에서 찾지 못한 경우, 직접 제거 시도
                         logger.info(f"ℹ️ 파일 목록에서 찾지 못함, 직접 제거 시도: {filename}")
                         rag_system.remove_document(filename)
                 except Exception as e:
                     logger.error(f"❌ RAG 시스템에서 문서 제거 실패: {filename} - {e}")
+        
+        # 그 다음 스토리지에서 파일 삭제
+        results = storage.delete_multiple_files(filenames)
         
         deleted_count = sum(1 for success in results.values() if success)
         
