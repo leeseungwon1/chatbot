@@ -52,9 +52,9 @@ class RAGSystem:
     def _validate_openai_api_key(self):
         """OpenAI API 키 유효성 검증"""
         try:
-            from openai import OpenAI
             import httpx
             import os
+            import json
             
             # 프록시 관련 환경 변수 완전 제거
             old_proxy_vars = {}
@@ -65,23 +65,37 @@ class RAGSystem:
                     del os.environ[var]
             
             try:
-                # 프록시 없는 httpx 클라이언트 생성
-                http_client = httpx.Client(
-                    proxies={},
-                    timeout=10.0,
-                    limits=httpx.Limits(max_keepalive_connections=2, max_connections=5)
+                # httpx 클라이언트 생성 (프록시 인수 제거)
+                try:
+                    # httpx 버전에 따라 proxies 인수 지원 여부 확인
+                    http_client = httpx.Client(
+                        timeout=10.0,
+                        limits=httpx.Limits(max_keepalive_connections=2, max_connections=5)
+                    )
+                except TypeError as e:
+                    if "proxies" in str(e):
+                        # proxies 인수가 지원되지 않는 경우 기본 클라이언트 사용
+                        http_client = httpx.Client(
+                            timeout=10.0
+                        )
+                    else:
+                        raise e
+                
+                # OpenAI API 직접 호출로 키 유효성 검증
+                headers = {
+                    "Authorization": f"Bearer {self.openai_api_key}",
+                    "Content-Type": "application/json"
+                }
+                
+                response = http_client.get(
+                    "https://api.openai.com/v1/models",
+                    headers=headers
                 )
                 
-                # OpenAI 클라이언트 생성
-                client = OpenAI(
-                    api_key=self.openai_api_key,
-                    http_client=http_client,
-                    timeout=10.0
-                )
-                
-                # 간단한 API 호출로 키 유효성 검증
-                response = client.models.list()
-                logger.info("✅ OpenAI API 키 유효성 검증 완료")
+                if response.status_code == 200:
+                    logger.info("✅ OpenAI API 키 유효성 검증 완료")
+                else:
+                    raise Exception(f"API 키 검증 실패: {response.status_code} - {response.text}")
                 
             finally:
                 # 환경 변수 복원
@@ -255,6 +269,8 @@ class RAGSystem:
     def _get_embedding(self, text: str) -> List[float]:
         """텍스트 임베딩 생성"""
         try:
+            logger.info("🔍 _get_embedding 메서드 시작 - 새로운 코드 경로")
+            
             if not text or not text.strip():
                 logger.warning("⚠️ 빈 텍스트로 임베딩 생성 시도")
                 return []
@@ -267,12 +283,13 @@ class RAGSystem:
                 text = text[:8000]
                 logger.warning(f"⚠️ 텍스트가 너무 길어서 8000자로 자름")
             
-            # OpenAI API 1.0.0+ 버전 호환
+            # OpenAI API 직접 호출 (httpx 사용)
+            logger.info("🔍 OpenAI API 직접 호출 시작 - httpx 사용")
             try:
-                # 새로운 API 방식 시도
-                from openai import OpenAI
                 import httpx
                 import os
+                import json
+                logger.info("🔍 httpx 모듈 import 완료")
                 
                 # 프록시 관련 환경 변수 완전 제거
                 old_proxy_vars = {}
@@ -281,28 +298,51 @@ class RAGSystem:
                     if var in os.environ:
                         old_proxy_vars[var] = os.environ[var]
                         del os.environ[var]
+                logger.info("🔍 프록시 환경 변수 제거 완료")
                 
                 try:
-                    # 완전히 새로운 httpx 클라이언트 생성 (프록시 완전 비활성화)
-                    http_client = httpx.Client(
-                        proxies={},  # 빈 딕셔너리로 프록시 완전 비활성화
-                        timeout=30.0,
-                        limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+                    # httpx 클라이언트 생성 (프록시 인수 제거)
+                    try:
+                        # httpx 버전에 따라 proxies 인수 지원 여부 확인
+                        http_client = httpx.Client(
+                            timeout=30.0,
+                            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+                        )
+                        logger.info("🔍 httpx 클라이언트 생성 완료 (limits 포함)")
+                    except TypeError as e:
+                        if "proxies" in str(e):
+                            # proxies 인수가 지원되지 않는 경우 기본 클라이언트 사용
+                            http_client = httpx.Client(
+                                timeout=30.0
+                            )
+                            logger.info("🔍 httpx 클라이언트 생성 완료 (기본 설정)")
+                        else:
+                            raise e
+                    
+                    # OpenAI API 직접 호출
+                    headers = {
+                        "Authorization": f"Bearer {self.openai_api_key}",
+                        "Content-Type": "application/json"
+                    }
+                    
+                    data = {
+                        "model": self.embedding_model,
+                        "input": text
+                    }
+                    
+                    logger.info(f"🔍 OpenAI API 호출 시작: {self.embedding_model}")
+                    response = http_client.post(
+                        "https://api.openai.com/v1/embeddings",
+                        headers=headers,
+                        json=data
                     )
                     
-                    # OpenAI 클라이언트 생성
-                    client = OpenAI(
-                        api_key=self.openai_api_key,
-                        http_client=http_client,
-                        timeout=30.0
-                    )
-                    
-                    # 임베딩 생성
-                    response = client.embeddings.create(
-                        model=self.embedding_model,
-                        input=text
-                    )
-                    embedding = response.data[0].embedding
+                    if response.status_code == 200:
+                        result = response.json()
+                        embedding = result['data'][0]['embedding']
+                        logger.info("🔍 OpenAI API 호출 성공")
+                    else:
+                        raise Exception(f"OpenAI API 오류: {response.status_code} - {response.text}")
                     
                 finally:
                     # 환경 변수 복원
@@ -311,21 +351,10 @@ class RAGSystem:
                     # HTTP 클라이언트 정리
                     if 'http_client' in locals():
                         http_client.close()
-            except ImportError:
-                # 구버전 API 방식 (fallback)
-                response = openai.Embedding.create(
-                    model=self.embedding_model,
-                    input=text
-                )
-                embedding = response['data'][0]['embedding']
+                        
             except Exception as client_error:
-                logger.warning(f"⚠️ 새로운 API 방식 실패, 구버전 시도: {client_error}")
-                # 구버전 API 방식 (fallback)
-                response = openai.Embedding.create(
-                    model=self.embedding_model,
-                    input=text
-                )
-                embedding = response['data'][0]['embedding']
+                logger.error(f"❌ OpenAI API 호출 실패: {client_error}")
+                raise Exception(f"OpenAI API 호출 실패: {client_error}")
             
             if embedding and len(embedding) > 0:
                 logger.debug(f"✅ 임베딩 생성 성공: {len(embedding)}차원")
@@ -768,12 +797,11 @@ class RAGSystem:
 
 답변:"""
             
-            # OpenAI API 1.0.0+ 버전 호환
+            # OpenAI API 직접 호출 (httpx 사용)
             try:
-                # 새로운 API 방식 시도
-                from openai import OpenAI
                 import httpx
                 import os
+                import json
                 
                 # 프록시 관련 환경 변수 완전 제거
                 old_proxy_vars = {}
@@ -784,31 +812,49 @@ class RAGSystem:
                         del os.environ[var]
                 
                 try:
-                    # 완전히 새로운 httpx 클라이언트 생성 (프록시 완전 비활성화)
-                    http_client = httpx.Client(
-                        proxies={},  # 빈 딕셔너리로 프록시 완전 비활성화
-                        timeout=30.0,
-                        limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
-                    )
+                    # httpx 클라이언트 생성 (프록시 인수 제거)
+                    try:
+                        # httpx 버전에 따라 proxies 인수 지원 여부 확인
+                        http_client = httpx.Client(
+                            timeout=30.0,
+                            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+                        )
+                    except TypeError as e:
+                        if "proxies" in str(e):
+                            # proxies 인수가 지원되지 않는 경우 기본 클라이언트 사용
+                            http_client = httpx.Client(
+                                timeout=30.0
+                            )
+                        else:
+                            raise e
                     
-                    # OpenAI 클라이언트 생성
-                    client = OpenAI(
-                        api_key=self.openai_api_key,
-                        http_client=http_client,
-                        timeout=30.0
-                    )
+                    # OpenAI API 직접 호출
+                    headers = {
+                        "Authorization": f"Bearer {self.openai_api_key}",
+                        "Content-Type": "application/json"
+                    }
                     
-                    # 채팅 완성 생성
-                    response = client.chat.completions.create(
-                        model=self.llm_model,
-                        messages=[
+                    data = {
+                        "model": self.llm_model,
+                        "messages": [
                             {"role": "system", "content": "당신은 도움이 되는 AI 어시스턴트입니다. **중요: 오직 제공된 문서의 내용만을 사용하여 답변해주세요.** 외부 지식이나 일반적인 법률 지식을 사용하지 마세요. 사용자가 '전체 내용을 그대로 보여달라'고 요청하면, 해당 조항의 모든 내용을 빠짐없이 완전히 제공해주세요. 각 문서의 제목(파일명)을 주의 깊게 살펴보고, 해당 문서와 관련된 내용을 우선적으로 참고해주세요. 사용자가 '저장하고 있는 문서가 뭐지?', '파일명을 알려달라' 등의 질문을 하면, 참고 문서들에서 파일명(=== 파일명 === 형태)을 찾아서 정확히 알려주세요. **절대로 제공된 문서에 없는 조항, 법령, 규정을 언급하지 마세요.** 문서에 없는 내용은 추측하지 말고, 문서 내용과 이전 대화 맥락만을 바탕으로 답변해주세요. 만약 질문에 대한 답변이 제공된 문서에 없다면, '제공된 문서에는 해당 내용이 없습니다. 더 자세한 정보가 필요하시면 관련 문서를 업로드해주세요.'라고 답변해주세요."},
                             {"role": "user", "content": prompt}
                         ],
-                        max_tokens=2000,
-                        temperature=0.3
+                        "max_tokens": 2000,
+                        "temperature": 0.3
+                    }
+                    
+                    response = http_client.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers=headers,
+                        json=data
                     )
-                    answer = response.choices[0].message.content.strip()
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        answer = result['choices'][0]['message']['content'].strip()
+                    else:
+                        raise Exception(f"OpenAI API 오류: {response.status_code} - {response.text}")
                     
                 finally:
                     # 환경 변수 복원
@@ -817,31 +863,10 @@ class RAGSystem:
                     # HTTP 클라이언트 정리
                     if 'http_client' in locals():
                         http_client.close()
-            except ImportError:
-                # 구버전 API 방식 (fallback)
-                response = openai.ChatCompletion.create(
-                    model=self.llm_model,
-                    messages=[
-                        {"role": "system", "content": "당신은 도움이 되는 AI 어시스턴트입니다. **중요: 오직 제공된 문서의 내용만을 사용하여 답변해주세요.** 외부 지식이나 일반적인 법률 지식을 사용하지 마세요. 사용자가 '전체 내용을 그대로 보여달라'고 요청하면, 해당 조항의 모든 내용을 빠짐없이 완전히 제공해주세요. 각 문서의 제목(파일명)을 주의 깊게 살펴보고, 해당 문서와 관련된 내용을 우선적으로 참고해주세요. 사용자가 '저장하고 있는 문서가 뭐지?', '파일명을 알려달라' 등의 질문을 하면, 참고 문서들에서 파일명(=== 파일명 === 형태)을 찾아서 정확히 알려주세요. **절대로 제공된 문서에 없는 조항, 법령, 규정을 언급하지 마세요.** 문서에 없는 내용은 추측하지 말고, 문서 내용과 이전 대화 맥락만을 바탕으로 답변해주세요. 만약 질문에 대한 답변이 제공된 문서에 없다면, '제공된 문서에는 해당 내용이 없습니다. 더 자세한 정보가 필요하시면 관련 문서를 업로드해주세요.'라고 답변해주세요."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=2000,
-                    temperature=0.3
-                )
-                answer = response.choices[0].message.content.strip()
+                        
             except Exception as client_error:
-                logger.warning(f"⚠️ 새로운 API 방식 실패, 구버전 시도: {client_error}")
-                # 구버전 API 방식 (fallback)
-                response = openai.ChatCompletion.create(
-                    model=self.llm_model,
-                    messages=[
-                        {"role": "system", "content": "당신은 도움이 되는 AI 어시스턴트입니다. **중요: 오직 제공된 문서의 내용만을 사용하여 답변해주세요.** 외부 지식이나 일반적인 법률 지식을 사용하지 마세요. 사용자가 '전체 내용을 그대로 보여달라'고 요청하면, 해당 조항의 모든 내용을 빠짐없이 완전히 제공해주세요. 각 문서의 제목(파일명)을 주의 깊게 살펴보고, 해당 문서와 관련된 내용을 우선적으로 참고해주세요. 사용자가 '저장하고 있는 문서가 뭐지?', '파일명을 알려달라' 등의 질문을 하면, 참고 문서들에서 파일명(=== 파일명 === 형태)을 찾아서 정확히 알려주세요. **절대로 제공된 문서에 없는 조항, 법령, 규정을 언급하지 마세요.** 문서에 없는 내용은 추측하지 말고, 문서 내용과 이전 대화 맥락만을 바탕으로 답변해주세요. 만약 질문에 대한 답변이 제공된 문서에 없다면, '제공된 문서에는 해당 내용이 없습니다. 더 자세한 정보가 필요하시면 관련 문서를 업로드해주세요.'라고 답변해주세요."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=2000,
-                    temperature=0.3
-                )
-                answer = response.choices[0].message.content.strip()
+                logger.error(f"❌ OpenAI API 호출 실패: {client_error}")
+                raise Exception(f"OpenAI API 호출 실패: {client_error}")
             logger.info(f"✅ 질의응답 완료: {question[:50]}...")
             return answer
             
