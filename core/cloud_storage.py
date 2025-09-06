@@ -72,13 +72,28 @@ class CloudStorage:
                 # gs://bucket/path 형식에서 경로 추출
                 path = file_url.replace(f"gs://{self.bucket_name}/", "")
                 blob = self.bucket.blob(path)
-                return blob.download_as_bytes()
+                
+                if not blob.exists():
+                    logger.error(f"❌ 파일이 존재하지 않음: {path}")
+                    raise FileNotFoundError(f"파일을 찾을 수 없습니다: {path}")
+                
+                content = blob.download_as_bytes()
+                logger.info(f"✅ Cloud Storage에서 파일 다운로드 성공: {len(content)} bytes")
+                return content
             else:
                 # 로컬 파일 경로인 경우
+                if not os.path.exists(file_url):
+                    logger.error(f"❌ 로컬 파일이 존재하지 않음: {file_url}")
+                    raise FileNotFoundError(f"파일을 찾을 수 없습니다: {file_url}")
+                
                 with open(file_url, 'rb') as f:
-                    return f.read()
+                    content = f.read()
+                logger.info(f"✅ 로컬 파일에서 다운로드 성공: {len(content)} bytes")
+                return content
         except Exception as e:
             logger.error(f"❌ 파일 다운로드 실패: {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
             raise
     
     def get_metadata(self) -> Dict[str, Any]:

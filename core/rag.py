@@ -440,21 +440,61 @@ class RAGSystem:
                     with open(temp_file_path, 'rb') as f:
                         pdf_reader = PyPDF2.PdfReader(f)
                         text = ""
-                        for page in pdf_reader.pages:
-                            text += page.extract_text() + "\n"
+                        for page_num, page in enumerate(pdf_reader.pages):
+                            try:
+                                page_text = page.extract_text()
+                                if page_text:
+                                    text += page_text + "\n"
+                                else:
+                                    logger.warning(f"⚠️ PDF 페이지 {page_num + 1}에서 텍스트 추출 실패")
+                            except Exception as page_error:
+                                logger.warning(f"⚠️ PDF 페이지 {page_num + 1} 처리 중 오류: {page_error}")
+                                continue
+                    
+                    if not text.strip():
+                        logger.error("❌ PDF에서 텍스트를 추출할 수 없습니다")
+                        return None
+                        
                 except ImportError:
                     logger.error("❌ PyPDF2가 설치되지 않았습니다")
+                    return None
+                except Exception as pdf_error:
+                    logger.error(f"❌ PDF 읽기 실패: {pdf_error}")
                     return None
             elif file_ext in ['docx', 'doc']:
                 try:
                     import docx2txt
                     text = docx2txt.process(temp_file_path)
+                    if not text or not text.strip():
+                        logger.error("❌ DOCX 파일에서 텍스트를 추출할 수 없습니다")
+                        return None
                 except ImportError:
                     logger.error("❌ docx2txt가 설치되지 않았습니다")
                     return None
+                except Exception as docx_error:
+                    logger.error(f"❌ DOCX 파일 읽기 실패: {docx_error}")
+                    return None
             elif file_ext == 'txt':
-                with open(temp_file_path, 'r', encoding='utf-8') as f:
-                    text = f.read()
+                # 다양한 인코딩으로 시도
+                encodings = ['utf-8', 'cp949', 'euc-kr', 'latin-1', 'iso-8859-1']
+                text = None
+                
+                for encoding in encodings:
+                    try:
+                        with open(temp_file_path, 'r', encoding=encoding) as f:
+                            text = f.read()
+                        logger.info(f"✅ 텍스트 파일 읽기 성공: {encoding} 인코딩 사용")
+                        break
+                    except UnicodeDecodeError:
+                        logger.warning(f"⚠️ {encoding} 인코딩으로 읽기 실패, 다음 인코딩 시도")
+                        continue
+                    except Exception as e:
+                        logger.warning(f"⚠️ {encoding} 인코딩으로 읽기 중 오류: {e}")
+                        continue
+                
+                if text is None:
+                    logger.error("❌ 모든 인코딩으로 텍스트 파일 읽기 실패")
+                    return None
             else:
                 logger.error(f"❌ 지원하지 않는 파일 형식: {file_ext}")
                 return None
@@ -467,6 +507,8 @@ class RAGSystem:
             
         except Exception as e:
             logger.error(f"❌ 문서 로드 실패: {filename} - {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
             return None
     
     def query(self, question: str, chat_history: list = None) -> str:
