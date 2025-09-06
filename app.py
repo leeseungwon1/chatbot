@@ -386,12 +386,24 @@ def delete_file(filename):
         
         # RAG 시스템에서 문서 제거
         if rag_system:
-            # 저장된 파일 목록에서 해당 파일의 원본 이름 찾기
-            files = storage.list_files()
-            for file_info in files:
-                if file_info['filename'] == decoded_filename:
-                    rag_system.remove_document(file_info['name'])
-                    break
+            try:
+                # 저장된 파일 목록에서 해당 파일의 원본 이름 찾기
+                files = storage.list_files()
+                for file_info in files:
+                    if file_info['filename'] == decoded_filename:
+                        # 원본 파일명으로 제거 시도
+                        success = rag_system.remove_document(file_info['name'])
+                        if success:
+                            logger.info(f"✅ RAG 시스템에서 문서 제거 완료: {file_info['name']}")
+                        else:
+                            logger.warning(f"⚠️ RAG 시스템에서 문서 제거 실패: {file_info['name']}")
+                        break
+                else:
+                    # 파일 목록에서 찾지 못한 경우, 디코딩된 파일명으로 직접 제거 시도
+                    logger.info(f"ℹ️ 파일 목록에서 찾지 못함, 직접 제거 시도: {decoded_filename}")
+                    rag_system.remove_document(decoded_filename)
+            except Exception as e:
+                logger.error(f"❌ RAG 시스템에서 문서 제거 중 오류: {e}")
         
         return jsonify({'message': '파일이 삭제되었습니다.'})
         
@@ -440,10 +452,18 @@ def batch_delete_files():
                     files = storage.list_files()
                     for file_info in files:
                         if file_info['filename'] == filename:
-                            rag_system.remove_document(file_info['name'])
+                            success = rag_system.remove_document(file_info['name'])
+                            if success:
+                                logger.info(f"✅ RAG 시스템에서 문서 제거 완료: {file_info['name']}")
+                            else:
+                                logger.warning(f"⚠️ RAG 시스템에서 문서 제거 실패: {file_info['name']}")
                             break
+                    else:
+                        # 파일 목록에서 찾지 못한 경우, 직접 제거 시도
+                        logger.info(f"ℹ️ 파일 목록에서 찾지 못함, 직접 제거 시도: {filename}")
+                        rag_system.remove_document(filename)
                 except Exception as e:
-                    logger.error(f"RAG 시스템에서 문서 제거 실패: {filename} - {filename} - {e}")
+                    logger.error(f"❌ RAG 시스템에서 문서 제거 실패: {filename} - {e}")
         
         deleted_count = sum(1 for success in results.values() if success)
         
@@ -472,23 +492,37 @@ def rebuild_embeddings():
         # 모든 파일에 대해 임베딩 재생성
         files = storage.list_files()
         embedded_count = 0
+        failed_count = 0
+        
+        logger.info(f"🔄 전체 임베딩 재구성 시작: {len(files)}개 파일")
         
         for file_info in files:
             try:
                 file_url = file_info.get('url')
                 filename = file_info.get('name', file_info.get('filename', ''))
+                stored_filename = file_info.get('filename', '')
                 
                 if file_url and filename:
-                    rag_system.add_document(file_url, filename)
-                    # 임베딩 상태 업데이트
-                    storage.mark_embedding_status(filename, True)
-                    embedded_count += 1
-                    logger.info(f"✅ 임베딩 완료: {filename}")
+                    logger.info(f"📄 임베딩 시작: {filename}")
+                    success = rag_system.add_document(file_url, stored_filename)
+                    if success:
+                        # 임베딩 상태 업데이트
+                        try:
+                            storage.mark_embedding_status(stored_filename, True)
+                            logger.info(f"✅ 임베딩 완료: {filename}")
+                        except Exception as status_error:
+                            logger.warning(f"⚠️ 임베딩 상태 업데이트 실패: {filename} - {status_error}")
+                        embedded_count += 1
+                    else:
+                        logger.error(f"❌ 임베딩 실패: {filename}")
+                        failed_count += 1
                 else:
                     logger.warning(f"⚠️ 파일 정보 누락: {file_info}")
+                    failed_count += 1
                     
             except Exception as e:
                 logger.error(f"❌ 파일 임베딩 실패: {filename} - {e}")
+                failed_count += 1
                 continue
         
         logger.info(f"✅ 전체 임베딩 재구성 완료: {embedded_count}개 파일")
@@ -533,23 +567,27 @@ def embed_selected_files():
                     
                     # 기존 임베딩 제거 (있다면)
                     try:
-                        rag_system.remove_document(filename)
+                        rag_system.remove_document(display_name)
                         logger.info(f"✅ 기존 임베딩 제거 완료: {display_name}")
                     except Exception as remove_error:
                         logger.warning(f"⚠️ 기존 임베딩 제거 실패: {display_name} - {remove_error}")
                     
                     # 새로 임베딩
-                    rag_system.add_document(file_url, display_name)
-                    logger.info(f"✅ 선택 임베딩 완료: {display_name}")
-                    
-                    # 임베딩 상태 업데이트
-                    try:
-                        storage.mark_embedding_status(display_name, True)
-                        logger.info(f"✅ 임베딩 상태 업데이트 완료: {display_name}")
-                    except Exception as status_error:
-                        logger.warning(f"⚠️ 임베딩 상태 업데이트 실패: {display_name} - {status_error}")
-                    
-                    embedded_count += 1
+                    success = rag_system.add_document(file_url, filename)
+                    if success:
+                        logger.info(f"✅ 선택 임베딩 완료: {display_name}")
+                        
+                        # 임베딩 상태 업데이트
+                        try:
+                            storage.mark_embedding_status(filename, True)
+                            logger.info(f"✅ 임베딩 상태 업데이트 완료: {display_name}")
+                        except Exception as status_error:
+                            logger.warning(f"⚠️ 임베딩 상태 업데이트 실패: {display_name} - {status_error}")
+                        
+                        embedded_count += 1
+                    else:
+                        logger.error(f"❌ 선택 임베딩 실패: {display_name}")
+                        failed_files.append(filename)
                 else:
                     logger.warning(f"⚠️ 파일을 찾을 수 없음: {filename}")
                     failed_files.append(filename)

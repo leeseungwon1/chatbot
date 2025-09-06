@@ -109,38 +109,55 @@ class CloudStorage:
             # 먼저 원본 파일명으로 메타데이터 찾기
             metadata = self.get_metadata()
             target_metadata_blob = None
+            found_filename = None
             
             # 원본 파일명으로 찾기
             for stored_filename, file_metadata in metadata.items():
                 if file_metadata.get('original_name') == filename:
                     target_metadata_blob = self.bucket.blob(f"metadata/{stored_filename}.json")
+                    found_filename = stored_filename
                     break
             
             # 원본 파일명으로 찾지 못한 경우, 저장된 파일명으로 시도
             if not target_metadata_blob:
-                target_metadata_blob = self.bucket.blob(f"metadata/{filename}.json")
+                # 저장된 파일명으로 직접 시도
+                if filename in metadata:
+                    target_metadata_blob = self.bucket.blob(f"metadata/{filename}.json")
+                    found_filename = filename
+                else:
+                    # 확장자 제거하고 시도
+                    filename_without_ext = filename.rsplit('.', 1)[0] if '.' in filename else filename
+                    for stored_filename, file_metadata in metadata.items():
+                        if stored_filename == filename or stored_filename.startswith(filename_without_ext):
+                            target_metadata_blob = self.bucket.blob(f"metadata/{stored_filename}.json")
+                            found_filename = stored_filename
+                            break
             
-            if target_metadata_blob.exists():
+            if target_metadata_blob and target_metadata_blob.exists():
                 # 기존 메타데이터 로드
                 content = target_metadata_blob.download_as_text()
-                metadata = json.loads(content)
+                metadata_data = json.loads(content)
                 
                 # 임베딩 상태 업데이트
-                metadata['has_embedding'] = has_embedding
-                metadata['updated_at'] = datetime.now().isoformat()
+                metadata_data['has_embedding'] = has_embedding
+                metadata_data['updated_at'] = datetime.now().isoformat()
                 
                 # 업데이트된 메타데이터 저장
                 target_metadata_blob.upload_from_string(
-                    json.dumps(metadata, ensure_ascii=False, indent=2),
+                    json.dumps(metadata_data, ensure_ascii=False, indent=2),
                     content_type='application/json'
                 )
                 
-                logger.info(f"✅ 임베딩 상태 업데이트: {filename} -> {has_embedding}")
+                logger.info(f"✅ 임베딩 상태 업데이트: {filename} -> {has_embedding} (메타데이터: {found_filename})")
             else:
                 logger.warning(f"⚠️ 메타데이터 파일을 찾을 수 없음: {filename}")
+                # 디버깅을 위해 메타데이터 목록 출력
+                logger.info(f"ℹ️ 사용 가능한 메타데이터 파일들: {list(metadata.keys())}")
                 
         except Exception as e:
             logger.error(f"❌ 임베딩 상태 업데이트 실패: {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
     
     def delete_file(self, filename: str) -> bool:
         """파일 삭제"""

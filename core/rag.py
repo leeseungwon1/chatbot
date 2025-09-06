@@ -172,9 +172,17 @@ class RAGSystem:
                 logger.error("❌ 스토리지가 초기화되지 않았습니다")
                 return False
             
+            # OpenAI API 키 확인
+            if not self.openai_api_key:
+                logger.error("❌ OpenAI API 키가 설정되지 않았습니다")
+                return False
+            
             # file_url에서 실제 저장된 파일명 추출
             if file_url.startswith('local://'):
                 stored_filename = file_url.replace('local://', '')
+            elif file_url.startswith('gs://'):
+                # gs://bucket/path 형식에서 파일명 추출
+                stored_filename = file_url.split('/')[-1]
             else:
                 stored_filename = filename
             
@@ -205,6 +213,9 @@ class RAGSystem:
             
             logger.info(f"📄 문서 추가 시작: {actual_filename} (저장된 파일명: {stored_filename})")
             
+            # 기존 임베딩이 있다면 제거
+            self.remove_document(actual_filename)
+            
             # 문서 로드
             content = self._load_document(file_url, stored_filename)
             if not content:
@@ -215,30 +226,53 @@ class RAGSystem:
             chunks = self._split_text(content)
             logger.info(f"📝 텍스트 분할 완료: {len(chunks)}개 청크")
             
+            if not chunks:
+                logger.error(f"❌ 텍스트 분할 결과가 비어있습니다: {stored_filename}")
+                return False
+            
             # 각 청크에 대해 임베딩 생성
+            successful_embeddings = 0
             for i, chunk in enumerate(chunks):
-                embedding = self._get_embedding(chunk)
-                if embedding:
-                    self.documents.append({
-                        'content': chunk,
-                        'filename': actual_filename,
-                        'stored_filename': stored_filename,
-                        'chunk_id': i
-                    })
-                    self.embeddings.append(embedding)
-                    self.vector_store[f"{actual_filename}_{i}"] = embedding
+                try:
+                    embedding = self._get_embedding(chunk)
+                    if embedding and len(embedding) > 0:
+                        self.documents.append({
+                            'content': chunk,
+                            'filename': actual_filename,
+                            'stored_filename': stored_filename,
+                            'chunk_id': i
+                        })
+                        self.embeddings.append(embedding)
+                        self.vector_store[f"{actual_filename}_{i}"] = embedding
+                        successful_embeddings += 1
+                        logger.info(f"✅ 청크 {i+1}/{len(chunks)} 임베딩 완료")
+                    else:
+                        logger.error(f"❌ 청크 {i+1}/{len(chunks)} 임베딩 실패")
+                except Exception as e:
+                    logger.error(f"❌ 청크 {i+1}/{len(chunks)} 임베딩 중 오류: {e}")
+                    continue
+            
+            if successful_embeddings == 0:
+                logger.error(f"❌ 모든 청크 임베딩 실패: {stored_filename}")
+                return False
             
             # 벡터 저장소 저장
             self._save_vector_store()
             
             # 스토리지에 임베딩 상태 표시
-            self.storage.mark_embedding_status(stored_filename, True)
+            try:
+                self.storage.mark_embedding_status(stored_filename, True)
+                logger.info(f"✅ 임베딩 상태 업데이트 완료: {stored_filename}")
+            except Exception as e:
+                logger.warning(f"⚠️ 임베딩 상태 업데이트 실패: {e}")
             
-            logger.info(f"✅ 문서 추가 완료: {actual_filename} ({len(chunks)}개 청크)")
+            logger.info(f"✅ 문서 추가 완료: {actual_filename} ({successful_embeddings}/{len(chunks)}개 청크 성공)")
             return True
             
         except Exception as e:
             logger.error(f"❌ 문서 추가 실패: {filename} - {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
             return False
     
     def _load_document(self, file_url: str, filename: str) -> Optional[str]:
@@ -517,8 +551,10 @@ class RAGSystem:
                     indices_to_remove.append(i)
             
             if not indices_to_remove:
-                logger.warning(f"⚠️ 제거할 문서를 찾을 수 없음: {filename}")
-                return False
+                logger.info(f"ℹ️ 제거할 문서가 없음: {filename}")
+                return True  # 이미 제거된 상태이므로 성공으로 처리
+            
+            logger.info(f"🗑️ 문서 제거 시작: {filename} ({len(indices_to_remove)}개 청크)")
             
             # 역순으로 제거 (인덱스 변화 방지)
             for i in reversed(indices_to_remove):
@@ -533,11 +569,21 @@ class RAGSystem:
             # 저장
             self._save_vector_store()
             
+            # 스토리지에 임베딩 상태 업데이트
+            try:
+                if self.storage:
+                    self.storage.mark_embedding_status(filename, False)
+                    logger.info(f"✅ 임베딩 상태 업데이트 완료: {filename}")
+            except Exception as e:
+                logger.warning(f"⚠️ 임베딩 상태 업데이트 실패: {e}")
+            
             logger.info(f"✅ 문서 제거 완료: {filename} ({len(indices_to_remove)}개 청크)")
             return True
             
         except Exception as e:
             logger.error(f"❌ 문서 제거 실패: {filename} - {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
             return False
     
     def rebuild_index(self) -> bool:
@@ -571,6 +617,12 @@ class RAGSystem:
     def clear_index(self) -> bool:
         """인덱스 초기화"""
         try:
+            logger.info("🗑️ 인덱스 초기화 시작")
+            
+            # 기존 문서 수 기록
+            old_doc_count = len(self.documents)
+            old_embedding_count = len(self.embeddings)
+            
             self.documents = []
             self.embeddings = []
             self.vector_store = {}
@@ -580,15 +632,24 @@ class RAGSystem:
             
             # 스토리지의 모든 파일 임베딩 상태를 False로 변경
             if self.storage:
-                files = self.storage.list_files()
-                for file_info in files:
-                    self.storage.mark_embedding_status(file_info['filename'], False)
+                try:
+                    files = self.storage.list_files()
+                    for file_info in files:
+                        try:
+                            self.storage.mark_embedding_status(file_info['filename'], False)
+                        except Exception as e:
+                            logger.warning(f"⚠️ 파일 임베딩 상태 업데이트 실패: {file_info['filename']} - {e}")
+                    logger.info(f"✅ {len(files)}개 파일의 임베딩 상태를 False로 업데이트")
+                except Exception as e:
+                    logger.warning(f"⚠️ 파일 목록 조회 실패: {e}")
             
-            logger.info("✅ 인덱스 초기화 완료")
+            logger.info(f"✅ 인덱스 초기화 완료: {old_doc_count}개 문서, {old_embedding_count}개 임베딩 제거")
             return True
             
         except Exception as e:
             logger.error(f"❌ 인덱스 초기화 실패: {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
             return False
     
     def get_status(self) -> Dict[str, Any]:
