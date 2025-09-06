@@ -1,6 +1,7 @@
 import os
 import tempfile
 import logging
+import time
 from typing import List, Optional, Dict, Any
 import openai
 import requests
@@ -24,6 +25,10 @@ class RAGSystem:
         self.embedding_model = "text-embedding-3-large"
         self.llm_model = "gpt-3.5-turbo"
         
+        # API 호출 속도 제한
+        self.last_api_call_time = 0
+        self.api_call_interval = 0.1  # 100ms 간격
+        
         # 기존 벡터 저장소 로드 (API 키와 무관하게 로드)
         self._load_vector_store()
         
@@ -32,6 +37,9 @@ class RAGSystem:
         if not self.openai_api_key:
             logger.warning("⚠️ OPENAI_API_KEY가 설정되지 않았습니다. 질의응답 기능은 사용할 수 없습니다.")
         else:
+            # API 키 유효성 검증
+            self._validate_openai_api_key()
+            
             # 구버전 API 호환성을 위해 설정
             try:
                 openai.api_key = self.openai_api_key
@@ -40,6 +48,64 @@ class RAGSystem:
                 logger.info("✅ OpenAI API 키 설정 완료 (신버전)")
             
         logger.info("✅ RAG 시스템 초기화 완료")
+    
+    def _validate_openai_api_key(self):
+        """OpenAI API 키 유효성 검증"""
+        try:
+            from openai import OpenAI
+            import httpx
+            import os
+            
+            # 프록시 관련 환경 변수 완전 제거
+            old_proxy_vars = {}
+            proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy']
+            for var in proxy_vars:
+                if var in os.environ:
+                    old_proxy_vars[var] = os.environ[var]
+                    del os.environ[var]
+            
+            try:
+                # 프록시 없는 httpx 클라이언트 생성
+                http_client = httpx.Client(
+                    proxies={},
+                    timeout=10.0,
+                    limits=httpx.Limits(max_keepalive_connections=2, max_connections=5)
+                )
+                
+                # OpenAI 클라이언트 생성
+                client = OpenAI(
+                    api_key=self.openai_api_key,
+                    http_client=http_client,
+                    timeout=10.0
+                )
+                
+                # 간단한 API 호출로 키 유효성 검증
+                response = client.models.list()
+                logger.info("✅ OpenAI API 키 유효성 검증 완료")
+                
+            finally:
+                # 환경 변수 복원
+                for var, value in old_proxy_vars.items():
+                    os.environ[var] = value
+                # HTTP 클라이언트 정리
+                if 'http_client' in locals():
+                    http_client.close()
+                    
+        except Exception as e:
+            logger.error(f"❌ OpenAI API 키 유효성 검증 실패: {e}")
+            logger.warning("⚠️ OpenAI API 키가 유효하지 않거나 네트워크 문제가 있을 수 있습니다.")
+    
+    def _rate_limit_api_call(self):
+        """API 호출 속도 제한"""
+        current_time = time.time()
+        time_since_last_call = current_time - self.last_api_call_time
+        
+        if time_since_last_call < self.api_call_interval:
+            sleep_time = self.api_call_interval - time_since_last_call
+            logger.debug(f"⏳ API 호출 속도 제한: {sleep_time:.3f}초 대기")
+            time.sleep(sleep_time)
+        
+        self.last_api_call_time = time.time()
     
     def _load_vector_store(self):
         """벡터 저장소 로드"""
@@ -193,6 +259,9 @@ class RAGSystem:
                 logger.warning("⚠️ 빈 텍스트로 임베딩 생성 시도")
                 return []
             
+            # API 호출 속도 제한
+            self._rate_limit_api_call()
+            
             # 텍스트 길이 제한 (OpenAI API 제한)
             if len(text) > 8000:  # 안전 마진을 두고 8000자로 제한
                 text = text[:8000]
@@ -205,23 +274,36 @@ class RAGSystem:
                 import httpx
                 import os
                 
-                # 프록시 관련 환경 변수 임시 제거
+                # 프록시 관련 환경 변수 완전 제거
                 old_proxy_vars = {}
-                proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+                proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy']
                 for var in proxy_vars:
                     if var in os.environ:
                         old_proxy_vars[var] = os.environ[var]
                         del os.environ[var]
                 
                 try:
-                    # 프록시 없는 httpx 클라이언트 생성
-                    http_client = httpx.Client(proxies=None)
-                    client = OpenAI(api_key=self.openai_api_key, http_client=http_client)
+                    # 완전히 새로운 httpx 클라이언트 생성 (프록시 완전 비활성화)
+                    http_client = httpx.Client(
+                        proxies={},  # 빈 딕셔너리로 프록시 완전 비활성화
+                        timeout=30.0,
+                        limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+                    )
+                    
+                    # OpenAI 클라이언트 생성
+                    client = OpenAI(
+                        api_key=self.openai_api_key,
+                        http_client=http_client,
+                        timeout=30.0
+                    )
+                    
+                    # 임베딩 생성
                     response = client.embeddings.create(
                         model=self.embedding_model,
                         input=text
                     )
                     embedding = response.data[0].embedding
+                    
                 finally:
                     # 환경 변수 복원
                     for var, value in old_proxy_vars.items():
@@ -693,18 +775,30 @@ class RAGSystem:
                 import httpx
                 import os
                 
-                # 프록시 관련 환경 변수 임시 제거
+                # 프록시 관련 환경 변수 완전 제거
                 old_proxy_vars = {}
-                proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+                proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy']
                 for var in proxy_vars:
                     if var in os.environ:
                         old_proxy_vars[var] = os.environ[var]
                         del os.environ[var]
                 
                 try:
-                    # 프록시 없는 httpx 클라이언트 생성
-                    http_client = httpx.Client(proxies=None)
-                    client = OpenAI(api_key=self.openai_api_key, http_client=http_client)
+                    # 완전히 새로운 httpx 클라이언트 생성 (프록시 완전 비활성화)
+                    http_client = httpx.Client(
+                        proxies={},  # 빈 딕셔너리로 프록시 완전 비활성화
+                        timeout=30.0,
+                        limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+                    )
+                    
+                    # OpenAI 클라이언트 생성
+                    client = OpenAI(
+                        api_key=self.openai_api_key,
+                        http_client=http_client,
+                        timeout=30.0
+                    )
+                    
+                    # 채팅 완성 생성
                     response = client.chat.completions.create(
                         model=self.llm_model,
                         messages=[
@@ -715,6 +809,7 @@ class RAGSystem:
                         temperature=0.3
                     )
                     answer = response.choices[0].message.content.strip()
+                    
                 finally:
                     # 환경 변수 복원
                     for var, value in old_proxy_vars.items():
