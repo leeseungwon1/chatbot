@@ -202,8 +202,9 @@ class RAGSystem:
             try:
                 # 새로운 API 방식 시도
                 from openai import OpenAI
-                # 환경 변수에서 프록시 설정 제거하고 클라이언트 생성
+                import httpx
                 import os
+                
                 # 프록시 관련 환경 변수 임시 제거
                 old_proxy_vars = {}
                 proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
@@ -213,7 +214,9 @@ class RAGSystem:
                         del os.environ[var]
                 
                 try:
-                    client = OpenAI(api_key=self.openai_api_key)
+                    # 프록시 없는 httpx 클라이언트 생성
+                    http_client = httpx.Client(proxies=None)
+                    client = OpenAI(api_key=self.openai_api_key, http_client=http_client)
                     response = client.embeddings.create(
                         model=self.embedding_model,
                         input=text
@@ -223,6 +226,9 @@ class RAGSystem:
                     # 환경 변수 복원
                     for var, value in old_proxy_vars.items():
                         os.environ[var] = value
+                    # HTTP 클라이언트 정리
+                    if 'http_client' in locals():
+                        http_client.close()
             except ImportError:
                 # 구버전 API 방식 (fallback)
                 response = openai.Embedding.create(
@@ -684,8 +690,9 @@ class RAGSystem:
             try:
                 # 새로운 API 방식 시도
                 from openai import OpenAI
-                # 환경 변수에서 프록시 설정 제거하고 클라이언트 생성
+                import httpx
                 import os
+                
                 # 프록시 관련 환경 변수 임시 제거
                 old_proxy_vars = {}
                 proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
@@ -695,7 +702,9 @@ class RAGSystem:
                         del os.environ[var]
                 
                 try:
-                    client = OpenAI(api_key=self.openai_api_key)
+                    # 프록시 없는 httpx 클라이언트 생성
+                    http_client = httpx.Client(proxies=None)
+                    client = OpenAI(api_key=self.openai_api_key, http_client=http_client)
                     response = client.chat.completions.create(
                         model=self.llm_model,
                         messages=[
@@ -710,6 +719,9 @@ class RAGSystem:
                     # 환경 변수 복원
                     for var, value in old_proxy_vars.items():
                         os.environ[var] = value
+                    # HTTP 클라이언트 정리
+                    if 'http_client' in locals():
+                        http_client.close()
             except ImportError:
                 # 구버전 API 방식 (fallback)
                 response = openai.ChatCompletion.create(
