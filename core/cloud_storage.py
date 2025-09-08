@@ -28,21 +28,14 @@ class CloudStorage:
             try:
                 logger.info(f"🔄 Cloud Storage 클라이언트 초기화 시도 {attempt + 1}/{max_retries}")
                 
-                # 메타데이터 서비스 타임아웃 문제 해결을 위한 설정
-                import os
-                
-                # 환경 변수 설정으로 메타데이터 서비스 타임아웃 증가
-                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = ''  # 기본 인증 사용
-                
-                # Cloud Storage 클라이언트 초기화 (타임아웃 설정 포함)
+                # Cloud Storage 클라이언트 초기화 (기본 방식)
                 self.client = storage.Client(project=self.project_id)
                 self.bucket = self.client.bucket(self.bucket_name)
                 
-                # 연결 테스트
+                # 연결 테스트 (간단한 버킷 존재 확인)
                 try:
-                    # 간단한 버킷 정보 조회로 연결 테스트
-                    bucket_info = self.bucket.exists()
-                    logger.info(f"✅ Cloud Storage 초기화 완료: {self.bucket_name} (연결 테스트 성공)")
+                    bucket_exists = self.bucket.exists()
+                    logger.info(f"✅ Cloud Storage 초기화 완료: {self.bucket_name} (버킷 존재: {bucket_exists})")
                     return
                 except Exception as test_error:
                     logger.warning(f"⚠️ 연결 테스트 실패, 재시도: {test_error}")
@@ -141,7 +134,14 @@ class CloudStorage:
                 # 클라이언트가 초기화되지 않은 경우 재시도
                 if not self.client or not self.bucket:
                     logger.info(f"🔄 클라이언트 재초기화 시도 {attempt + 1}/{max_retries}")
-                    self._initialize_client_with_retry()
+                    try:
+                        self._initialize_client_with_retry()
+                    except Exception as init_error:
+                        logger.error(f"❌ 클라이언트 재초기화 실패: {init_error}")
+                        if attempt < max_retries - 1:
+                            continue
+                        else:
+                            return {}
                 
                 metadata = {}
                 blobs = self.bucket.list_blobs(prefix="metadata/")
@@ -357,7 +357,19 @@ class CloudStorage:
                 # 클라이언트가 초기화되지 않은 경우 재시도
                 if not self.client or not self.bucket:
                     logger.info(f"🔄 클라이언트 재초기화 시도 {attempt + 1}/{max_retries}")
-                    self._initialize_client_with_retry()
+                    try:
+                        self._initialize_client_with_retry()
+                    except Exception as init_error:
+                        logger.error(f"❌ 클라이언트 재초기화 실패: {init_error}")
+                        if attempt < max_retries - 1:
+                            continue
+                        else:
+                            return {
+                                'type': 'cloud_storage',
+                                'error': f'클라이언트 초기화 실패: {init_error}',
+                                'bucket_name': self.bucket_name,
+                                'project_id': self.project_id
+                            }
                 
                 # 버킷 정보
                 bucket_info = {

@@ -133,7 +133,14 @@ class RAGSystem:
                             # 클라이언트가 초기화되지 않은 경우 재시도
                             if not self.storage.client or not self.storage.bucket:
                                 logger.info(f"🔄 스토리지 클라이언트 재초기화 시도 {attempt + 1}/{max_retries}")
-                                self.storage._initialize_client_with_retry()
+                                try:
+                                    self.storage._initialize_client_with_retry()
+                                except Exception as init_error:
+                                    logger.error(f"❌ 스토리지 클라이언트 재초기화 실패: {init_error}")
+                                    if attempt < max_retries - 1:
+                                        continue
+                                    else:
+                                        return
                             
                             vector_blob = self.storage.bucket.blob("vector_store/vector_store.pkl")
                             if vector_blob.exists():
