@@ -325,9 +325,9 @@ function uploadAndEmbed() {
         progress += Math.random() * 15;
         if (progress > 90) progress = 90;
         
-        // 파일별 진행률 계산
-        const fileProgress = Math.floor(progress / totalFiles);
-        if (fileProgress > currentFile) {
+        // 파일별 진행률 계산 (올바른 로직)
+        const fileProgress = Math.floor((progress / 100) * totalFiles);
+        if (fileProgress > currentFile && fileProgress <= totalFiles) {
             currentFile = fileProgress;
         }
         
