@@ -855,8 +855,12 @@ footer {
         border-radius: 12px;
     }
     
-    .hero-content h2 {
+    .hero-content h2.desktop-only {
         display: none; /* 모바일에서 제목 숨김 */
+    }
+    
+    .hero-content p.desktop-only {
+        display: none; /* 모바일에서 설명 숨김 */
     }
     
     .hero-content p {
@@ -1230,8 +1234,12 @@ footer {
         margin-bottom: 8px;
     }
     
-    .hero-content h2 {
+    .hero-content h2.desktop-only {
         display: none; /* 모바일에서 제목 숨김 */
+    }
+    
+    .hero-content p.desktop-only {
+        display: none; /* 모바일에서 설명 숨김 */
     }
     
     .hero-content p {
