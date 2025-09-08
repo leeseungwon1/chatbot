@@ -218,13 +218,20 @@ function refreshDocumentStatus() {
 
 // 벡터 DB 정보 새로고침
 function refreshVectorDBInfo() {
-    fetch('/api/status')
+    fetch('/api/admin/vector-db-info')
         .then(response => response.json())
         .then(data => {
-            if (data.rag_system) {
-                document.getElementById('totalVectors').textContent = data.rag_system.total_embeddings || 0;
-                document.getElementById('dimensions').textContent = data.rag_system.total_embeddings > 0 ? '1536' : '-';
-                document.getElementById('dbSize').textContent = '계산 중...';
+            if (data.error) {
+                showNotification(data.error, 'error');
+                return;
+            }
+            
+            if (data.vector_db) {
+                document.getElementById('totalVectors').textContent = data.vector_db.total_vectors || 0;
+                // text-embedding-3-large는 3072차원
+                const dimensions = data.vector_db.dimensions || 0;
+                document.getElementById('dimensions').textContent = dimensions > 0 ? dimensions : '-';
+                document.getElementById('dbSize').textContent = data.vector_db.db_size_mb ? data.vector_db.db_size_mb + 'MB' : '-';
             }
         })
         .catch(error => {

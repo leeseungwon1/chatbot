@@ -248,16 +248,24 @@ class RAGSystem:
             logger.warning(f"⚠️ 기존 문서 제거 중 오류: {e}")
     
     def _save_vector_store(self):
-        """벡터 저장소 저장"""
-        try:
-            if self.storage:
+        """벡터 저장소 저장 (재시도 로직 포함)"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if not self.storage:
+                    logger.error("❌ 스토리지가 초기화되지 않았습니다")
+                    return False
+                
                 data = {
                     'documents': self.documents,
                     'embeddings': self.embeddings,
-                    'vector_store': self.vector_store
+                    'vector_store': self.vector_store,
+                    'saved_at': datetime.now().isoformat(),
+                    'total_documents': len(self.documents),
+                    'total_embeddings': len(self.embeddings)
                 }
                 
-                logger.info(f"🔍 벡터 저장소 저장 시작: 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개")
+                logger.info(f"🔍 벡터 저장소 저장 시작 (시도 {attempt + 1}/{max_retries}): 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개")
                 
                 # Cloud Storage 전용
                 if hasattr(self.storage, 'bucket'):
@@ -267,24 +275,59 @@ class RAGSystem:
                         vector_blob.upload_from_string(vector_data, content_type='application/octet-stream')
                         logger.info(f"✅ Cloud Storage에 벡터 저장소 저장 완료: {len(vector_data)} bytes")
                         
-                        # 저장 후 확인
-                        if vector_blob.exists():
-                            logger.info("✅ 벡터 저장소 파일 존재 확인 완료")
+                        # 저장 후 확인 (재시도)
+                        for verify_attempt in range(3):
+                            if vector_blob.exists():
+                                # 파일 크기 확인
+                                actual_size = vector_blob.size
+                                if actual_size == len(vector_data):
+                                    logger.info(f"✅ 벡터 저장소 파일 저장 및 검증 완료: {actual_size} bytes")
+                                    return True
+                                else:
+                                    logger.warning(f"⚠️ 파일 크기 불일치: 예상 {len(vector_data)} bytes, 실제 {actual_size} bytes")
+                            else:
+                                logger.warning(f"⚠️ 벡터 저장소 파일 존재하지 않음 (확인 시도 {verify_attempt + 1}/3)")
+                            
+                            if verify_attempt < 2:
+                                import time
+                                time.sleep(1)  # 1초 대기 후 재확인
+                        
+                        logger.error("❌ 벡터 저장소 파일 저장 후 검증 실패")
+                        if attempt < max_retries - 1:
+                            continue
                         else:
-                            logger.error("❌ 벡터 저장소 파일 저장 후 존재하지 않음")
+                            return False
                             
                     except Exception as e:
-                        logger.error(f"❌ Cloud Storage 벡터 저장소 저장 실패: {e}")
-                        import traceback
-                        logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+                        logger.warning(f"⚠️ Cloud Storage 벡터 저장소 저장 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+                        if attempt < max_retries - 1:
+                            import time
+                            wait_time = (attempt + 1) * 2
+                            logger.info(f"⏳ {wait_time}초 후 재시도...")
+                            time.sleep(wait_time)
+                        else:
+                            logger.error(f"❌ Cloud Storage 벡터 저장소 저장 최종 실패: {e}")
+                            import traceback
+                            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+                            return False
                 else:
                     logger.error("❌ Cloud Storage가 초기화되지 않았습니다")
-            else:
-                logger.error("❌ 스토리지가 초기화되지 않았습니다")
-        except Exception as e:
-            logger.error(f"❌ 벡터 저장소 저장 실패: {e}")
-            import traceback
-            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+                    return False
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ 벡터 저장소 저장 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    wait_time = (attempt + 1) * 2
+                    logger.info(f"⏳ {wait_time}초 후 재시도...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"❌ 벡터 저장소 저장 최종 실패: {e}")
+                    import traceback
+                    logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+                    return False
+        
+        return False
     
     def _delete_vector_store(self):
         """벡터 저장소 파일 삭제 (Cloud Storage 전용)"""
@@ -1093,45 +1136,67 @@ class RAGSystem:
         return status
     
     def get_vector_db_info(self) -> Dict[str, Any]:
-        """벡터 DB 상세 정보 반환"""
-        logger.info(f"🔍 벡터 DB 정보 조회: 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개")
+        """벡터 DB 상세 정보 반환 (Cloud Storage와 동기화)"""
+        logger.info(f"🔍 벡터 DB 정보 조회: 메모리 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개")
         
-        if not self.embeddings:
-            logger.info("🔍 벡터 DB가 비어있음")
-            return {
-                'total_vectors': 0,
-                'dimensions': 0,
-                'db_size_mb': 0,
-                'index_type': 'empty',
-                'storage_path': 'Cloud Storage' if self.storage and hasattr(self.storage, 'bucket') else 'unknown'
-            }
-        
-        # 첫 번째 임베딩의 차원 수 확인
-        dimensions = len(self.embeddings[0]) if self.embeddings else 0
-        logger.info(f"🔍 벡터 DB 차원수: {dimensions}")
-        
-        # Cloud Storage에서 벡터 저장소 파일 크기 확인
+        # Cloud Storage에서 실제 벡터 저장소 파일 확인
+        cloud_vectors = 0
         db_size = 0
         file_exists = False
+        
         if self.storage and hasattr(self.storage, 'bucket'):
             try:
                 vector_blob = self.storage.bucket.blob('vector_store/vector_store.pkl')
                 file_exists = vector_blob.exists()
                 if file_exists:
                     db_size = vector_blob.size
-                    logger.info(f"🔍 Cloud Storage 벡터 파일 크기: {db_size} bytes")
+                    # 실제 벡터 저장소 파일에서 벡터 수 확인
+                    try:
+                        vector_data = vector_blob.download_as_bytes()
+                        data = pickle.loads(vector_data)
+                        cloud_vectors = len(data.get('embeddings', []))
+                        logger.info(f"🔍 Cloud Storage 벡터 파일 크기: {db_size} bytes, 벡터 수: {cloud_vectors}개")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 벡터 저장소 파일 로드 실패: {e}")
+                        cloud_vectors = 0
                 else:
                     logger.warning("⚠️ Cloud Storage에 벡터 파일이 존재하지 않음")
             except Exception as e:
                 logger.warning(f"⚠️ 벡터 저장소 파일 크기 확인 실패: {e}")
         
+        # 메모리와 Cloud Storage 중 더 정확한 값 사용
+        actual_vectors = max(len(self.embeddings), cloud_vectors)
+        
+        # 차원수 계산 (text-embedding-3-large는 3072차원)
+        dimensions = 0
+        if self.embeddings and len(self.embeddings) > 0:
+            dimensions = len(self.embeddings[0])
+        elif cloud_vectors > 0 and self.storage and hasattr(self.storage, 'bucket'):
+            # Cloud Storage에서 벡터 저장소 파일이 있으면 차원수 확인
+            try:
+                vector_blob = self.storage.bucket.blob('vector_store/vector_store.pkl')
+                if vector_blob.exists():
+                    vector_data = vector_blob.download_as_bytes()
+                    data = pickle.loads(vector_data)
+                    embeddings = data.get('embeddings', [])
+                    if embeddings and len(embeddings) > 0:
+                        dimensions = len(embeddings[0])
+            except Exception as e:
+                logger.warning(f"⚠️ 차원수 확인 실패: {e}")
+        
+        # text-embedding-3-large 모델의 기본 차원수
+        if dimensions == 0 and self.embedding_model == "text-embedding-3-large":
+            dimensions = 3072
+        
         result = {
-            'total_vectors': len(self.embeddings),
+            'total_vectors': actual_vectors,
             'dimensions': dimensions,
             'db_size_mb': round(db_size / (1024**2), 2),
             'index_type': 'pickle',
             'storage_path': 'Cloud Storage' if self.storage and hasattr(self.storage, 'bucket') else 'unknown',
-            'file_exists': file_exists
+            'file_exists': file_exists,
+            'memory_vectors': len(self.embeddings),
+            'cloud_vectors': cloud_vectors
         }
         
         logger.info(f"🔍 벡터 DB 정보 반환: {result}")
