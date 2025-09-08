@@ -40,8 +40,8 @@ MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 # 사용자 계정
 USERS = {
-    'admin': {'password': 'admin123', 'role': 'admin'},
-    'user': {'password': 'user123', 'role': 'user'}
+    'admin': {'password': '12345', 'role': 'admin'},
+    'user': {'password': '12345', 'role': 'user'}
 }
 
 # RAG 시스템 초기화 (Cloud Run에서는 지연 로딩)
