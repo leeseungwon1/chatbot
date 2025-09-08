@@ -1168,7 +1168,7 @@ class RAGSystem:
         result = {
             'total_vectors': actual_vectors,
             'dimensions': dimensions,
-            'db_size_mb': round(db_size / (1024**2), 2),
+            'db_size_mb': round(db_size / (1024**2), 2) if db_size and db_size > 0 else 0,
             'index_type': 'pickle',
             'storage_path': 'Cloud Storage' if self.storage and hasattr(self.storage, 'bucket') else 'unknown',
             'file_exists': file_exists,
