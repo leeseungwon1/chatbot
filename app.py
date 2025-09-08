@@ -873,14 +873,43 @@ def get_recent_activity():
 @app.route('/api/admin/vector-db-info')
 @admin_required
 def get_vector_db_info():
-    """벡터 DB 정보 반환"""
+    """벡터 DB 정보 반환 (안전한 버전)"""
     try:
+        # RAG 시스템 초기화 확인
         if not rag_system:
-            return jsonify({'error': 'RAG 시스템이 초기화되지 않았습니다.'}), 500
+            logger.warning("⚠️ RAG 시스템이 초기화되지 않음")
+            return jsonify({
+                'vector_db': {
+                    'total_vectors': 0,
+                    'dimensions': 0,
+                    'db_size_mb': 0,
+                    'index_type': 'empty',
+                    'storage_path': 'unknown',
+                    'file_exists': False,
+                    'embedding_model': 'unknown'
+                },
+                'storage': {
+                    'total_size_mb': 0,
+                    'vector_store_size_mb': 0
+                },
+                'error': 'RAG 시스템이 초기화되지 않았습니다.'
+            })
         
-        # 벡터 저장소 정보
-        vector_info = rag_system.get_vector_db_info()
-        
+        # 벡터 저장소 정보 조회 (안전하게)
+        try:
+            vector_info = rag_system.get_vector_db_info()
+        except Exception as rag_error:
+            logger.error(f"❌ RAG 시스템 벡터 정보 조회 실패: {rag_error}")
+            # 기본값 반환
+            vector_info = {
+                'total_vectors': 0,
+                'dimensions': 0,
+                'db_size_mb': 0,
+                'index_type': 'error',
+                'storage_path': 'unknown',
+                'file_exists': False,
+                'embedding_model': 'unknown'
+            }
         
         return jsonify({
             'vector_db': vector_info,
@@ -891,8 +920,25 @@ def get_vector_db_info():
         })
         
     except Exception as e:
-        logger.error(f"벡터 DB 정보 조회 중 오류: {e}")
-        return jsonify({'error': '벡터 DB 정보 조회에 실패했습니다.'}), 500
+        logger.error(f"❌ 벡터 DB 정보 조회 중 오류: {e}")
+        import traceback
+        logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
+        return jsonify({
+            'error': f'벡터 DB 정보 조회에 실패했습니다: {str(e)}',
+            'vector_db': {
+                'total_vectors': 0,
+                'dimensions': 0,
+                'db_size_mb': 0,
+                'index_type': 'error',
+                'storage_path': 'unknown',
+                'file_exists': False,
+                'embedding_model': 'unknown'
+            },
+            'storage': {
+                'total_size_mb': 0,
+                'vector_store_size_mb': 0
+            }
+        })
 
 @app.route('/api/admin/search-test', methods=['POST'])
 @admin_required
