@@ -772,8 +772,27 @@ footer {
     background-color: var(--white-color);
 }
 
+/* 데스크톱 전용 요소 */
+.desktop-only {
+    display: block;
+}
+
+/* 모바일 전용 요소 */
+.mobile-only {
+    display: none;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
+    /* 데스크톱 전용 요소 숨기기 */
+    .desktop-only {
+        display: none;
+    }
+    
+    /* 모바일 전용 요소 보이기 */
+    .mobile-only {
+        display: block;
+    }
     /* Header 모바일 최적화 */
     header {
         padding: 10px 0;
@@ -789,6 +808,8 @@ footer {
         margin-left: 0;
         gap: 8px;
         justify-content: center;
+        flex-direction: column;
+        text-align: center;
     }
     
     .logo-img {
@@ -796,8 +817,10 @@ footer {
     }
     
     .logo h1 {
-        font-size: 1.1em;
-        line-height: 1.2;
+        font-size: 1em;
+        line-height: 1.1;
+        margin: 0;
+        text-align: center;
     }
     
     .nav-links {
@@ -827,30 +850,33 @@ footer {
     
     /* Hero Section 모바일 최적화 */
     .hero-section {
-        padding: 20px 10px;
-        margin-bottom: 15px;
+        padding: 15px 10px;
+        margin-bottom: 10px;
         border-radius: 12px;
     }
     
     .hero-content h2 {
-        font-size: 1.5em;
-        margin-bottom: 12px;
-        line-height: 1.3;
+        display: none; /* 모바일에서 제목 숨김 */
     }
     
     .hero-content p {
         font-size: 0.9em;
         line-height: 1.4;
+        margin: 0;
     }
     
     /* Chat Section 모바일 최적화 */
     .chat-container {
         margin-bottom: 15px;
         border-radius: 12px;
+        height: calc(100vh - 200px); /* 전체 화면 높이에서 헤더/푸터 제외 */
+        display: flex;
+        flex-direction: column;
     }
     
     .chat-header {
         padding: 12px 15px;
+        flex-shrink: 0;
     }
     
     .chat-header h3 {
@@ -859,11 +885,15 @@ footer {
     
     .chat-messages {
         padding: 12px 15px;
-        max-height: 250px;
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0; /* flexbox에서 스크롤 가능하게 */
     }
     
     .chat-input {
         padding: 12px 15px;
+        flex-shrink: 0;
+        border-top: 1px solid var(--border-color);
     }
     
     .chat-input form {
@@ -897,8 +927,11 @@ footer {
     }
     
     .login-box h2 {
-        font-size: 1.6em;
-        margin-bottom: 20px;
+        display: none; /* 모바일에서 로그인 제목 숨김 */
+    }
+    
+    .login-form {
+        margin-top: 0;
     }
     
     .form-group {
@@ -1124,12 +1157,19 @@ footer {
         gap: 6px;
     }
     
+    .logo {
+        flex-direction: column;
+        text-align: center;
+    }
+    
     .logo-img {
         height: 30px;
     }
     
     .logo h1 {
-        font-size: 1em;
+        font-size: 0.9em;
+        margin: 0;
+        text-align: center;
     }
     
     .nav-link {
@@ -1148,8 +1188,11 @@ footer {
     }
     
     .login-box h2 {
-        font-size: 1.4em;
-        margin-bottom: 15px;
+        display: none; /* 모바일에서 로그인 제목 숨김 */
+    }
+    
+    .login-form {
+        margin-top: 0;
     }
     
     .form-group {
@@ -1183,20 +1226,24 @@ footer {
     
     /* 히어로 섹션 초소형 최적화 */
     .hero-section {
-        padding: 15px 8px;
-        margin-bottom: 10px;
+        padding: 10px 8px;
+        margin-bottom: 8px;
     }
     
     .hero-content h2 {
-        font-size: 1.3em;
-        margin-bottom: 10px;
+        display: none; /* 모바일에서 제목 숨김 */
     }
     
     .hero-content p {
         font-size: 0.85em;
+        margin: 0;
     }
     
     /* 채팅 섹션 초소형 최적화 */
+    .chat-container {
+        height: calc(100vh - 180px); /* 더 작은 화면에서 높이 조정 */
+    }
+    
     .chat-header {
         padding: 10px 12px;
     }
@@ -1207,11 +1254,14 @@ footer {
     
     .chat-messages {
         padding: 10px 12px;
-        max-height: 200px;
+        flex: 1;
+        overflow-y: auto;
+        min-height: 0;
     }
     
     .chat-input {
         padding: 10px 12px;
+        flex-shrink: 0;
     }
     
     .chat-input input[type="text"] {

@@ -16,7 +16,7 @@
                 </div>
                 <div class="nav-links">
                     {% if session.authenticated %}
-                        <span class="user-info">{{ session.username }} ({{ session.role }})</span>
+                        <span class="user-info desktop-only">{{ session.username }} ({{ session.role }})</span>
                         {% if session.role == 'admin' %}
                             <a href="{{ url_for('admin') }}" class="nav-link">관리자</a>
                             <a href="{{ url_for('index') }}" class="nav-link">챗봇으로 이동</a>
