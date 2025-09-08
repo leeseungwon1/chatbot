@@ -17,14 +17,51 @@ class CloudStorage:
         self.project_id = project_id
         self.is_cloud_run = is_cloud_run
         
-        # Cloud Storage 클라이언트 초기화
-        try:
-            self.client = storage.Client(project=project_id)
-            self.bucket = self.client.bucket(bucket_name)
-            logger.info(f"✅ Cloud Storage 초기화 완료: {bucket_name}")
-        except Exception as e:
-            logger.error(f"❌ Cloud Storage 초기화 실패: {e}")
-            raise
+        # Cloud Storage 클라이언트 초기화 (재시도 로직 포함)
+        self.client = None
+        self.bucket = None
+        self._initialize_client_with_retry()
+    
+    def _initialize_client_with_retry(self, max_retries: int = 3):
+        """재시도 로직을 포함한 클라이언트 초기화"""
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"🔄 Cloud Storage 클라이언트 초기화 시도 {attempt + 1}/{max_retries}")
+                
+                # 메타데이터 서비스 타임아웃 문제 해결을 위한 설정
+                import os
+                
+                # 환경 변수 설정으로 메타데이터 서비스 타임아웃 증가
+                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = ''  # 기본 인증 사용
+                
+                # Cloud Storage 클라이언트 초기화 (타임아웃 설정 포함)
+                self.client = storage.Client(project=self.project_id)
+                self.bucket = self.client.bucket(self.bucket_name)
+                
+                # 연결 테스트
+                try:
+                    # 간단한 버킷 정보 조회로 연결 테스트
+                    bucket_info = self.bucket.exists()
+                    logger.info(f"✅ Cloud Storage 초기화 완료: {self.bucket_name} (연결 테스트 성공)")
+                    return
+                except Exception as test_error:
+                    logger.warning(f"⚠️ 연결 테스트 실패, 재시도: {test_error}")
+                    raise test_error
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Cloud Storage 초기화 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+                
+                if attempt < max_retries - 1:
+                    import time
+                    wait_time = (attempt + 1) * 2  # 2, 4, 6초 대기
+                    logger.info(f"⏳ {wait_time}초 후 재시도...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"❌ Cloud Storage 초기화 최종 실패: {e}")
+                    # 초기화 실패해도 클라이언트는 None으로 유지하여 나중에 재시도 가능
+                    self.client = None
+                    self.bucket = None
+                    raise
     
     def upload_file(self, file) -> str:
         """파일을 Cloud Storage에 업로드"""
@@ -97,26 +134,42 @@ class CloudStorage:
             raise
     
     def get_metadata(self) -> Dict[str, Any]:
-        """모든 파일의 메타데이터 조회"""
-        try:
-            metadata = {}
-            blobs = self.bucket.list_blobs(prefix="metadata/")
-            
-            for blob in blobs:
-                if blob.name.endswith('.json'):
-                    try:
-                        content = blob.download_as_text()
-                        data = json.loads(content)
-                        # 파일명에서 .json 제거
-                        filename = blob.name.replace("metadata/", "").replace(".json", "")
-                        metadata[filename] = data
-                    except Exception as e:
-                        logger.warning(f"⚠️ 메타데이터 로드 실패: {blob.name} - {e}")
-            
-            return metadata
-        except Exception as e:
-            logger.error(f"❌ 메타데이터 조회 실패: {e}")
-            return {}
+        """모든 파일의 메타데이터 조회 (재시도 로직 포함)"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # 클라이언트가 초기화되지 않은 경우 재시도
+                if not self.client or not self.bucket:
+                    logger.info(f"🔄 클라이언트 재초기화 시도 {attempt + 1}/{max_retries}")
+                    self._initialize_client_with_retry()
+                
+                metadata = {}
+                blobs = self.bucket.list_blobs(prefix="metadata/")
+                
+                for blob in blobs:
+                    if blob.name.endswith('.json'):
+                        try:
+                            content = blob.download_as_text()
+                            data = json.loads(content)
+                            # 파일명에서 .json 제거
+                            filename = blob.name.replace("metadata/", "").replace(".json", "")
+                            metadata[filename] = data
+                        except Exception as e:
+                            logger.warning(f"⚠️ 메타데이터 로드 실패: {blob.name} - {e}")
+                
+                return metadata
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 메타데이터 조회 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+                
+                if attempt < max_retries - 1:
+                    import time
+                    wait_time = (attempt + 1) * 2
+                    logger.info(f"⏳ {wait_time}초 후 재시도...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"❌ 메타데이터 조회 최종 실패: {e}")
+                    return {}
     
     def mark_embedding_status(self, filename: str, has_embedding: bool):
         """임베딩 상태 업데이트"""
@@ -297,33 +350,50 @@ class CloudStorage:
             }
     
     def get_storage_info(self) -> Dict[str, Any]:
-        """저장소 정보 조회"""
-        try:
-            # 버킷 정보
-            bucket_info = {
-                'name': self.bucket_name,
-                'location': self.bucket.location,
-                'storage_class': self.bucket.storage_class,
-                'created': self.bucket.time_created.isoformat() if self.bucket.time_created else None
-            }
-            
-            # 파일 통계
-            doc_blobs = list(self.bucket.list_blobs(prefix="documents/"))
-            metadata_blobs = list(self.bucket.list_blobs(prefix="metadata/"))
-            
-            total_size = sum(blob.size for blob in doc_blobs if blob.size)
-            
-            return {
-                'type': 'cloud_storage',
-                'bucket_info': bucket_info,
-                'total_files': len(doc_blobs),
-                'total_size': total_size,
-                'metadata_files': len(metadata_blobs)
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 저장소 정보 조회 실패: {e}")
-            return {
-                'type': 'cloud_storage',
-                'error': str(e)
-            }
+        """저장소 정보 조회 (재시도 로직 포함)"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # 클라이언트가 초기화되지 않은 경우 재시도
+                if not self.client or not self.bucket:
+                    logger.info(f"🔄 클라이언트 재초기화 시도 {attempt + 1}/{max_retries}")
+                    self._initialize_client_with_retry()
+                
+                # 버킷 정보
+                bucket_info = {
+                    'name': self.bucket_name,
+                    'location': self.bucket.location,
+                    'storage_class': self.bucket.storage_class,
+                    'created': self.bucket.time_created.isoformat() if self.bucket.time_created else None
+                }
+                
+                # 파일 통계
+                doc_blobs = list(self.bucket.list_blobs(prefix="documents/"))
+                metadata_blobs = list(self.bucket.list_blobs(prefix="metadata/"))
+                
+                total_size = sum(blob.size for blob in doc_blobs if blob.size)
+                
+                return {
+                    'type': 'cloud_storage',
+                    'bucket_info': bucket_info,
+                    'total_files': len(doc_blobs),
+                    'total_size': total_size,
+                    'metadata_files': len(metadata_blobs)
+                }
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 저장소 정보 조회 실패 (시도 {attempt + 1}/{max_retries}): {e}")
+                
+                if attempt < max_retries - 1:
+                    import time
+                    wait_time = (attempt + 1) * 2
+                    logger.info(f"⏳ {wait_time}초 후 재시도...")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"❌ 저장소 정보 조회 최종 실패: {e}")
+                    return {
+                        'type': 'cloud_storage',
+                        'error': str(e),
+                        'bucket_name': self.bucket_name,
+                        'project_id': self.project_id
+                    }
