@@ -1136,57 +1136,34 @@ class RAGSystem:
         return status
     
     def get_vector_db_info(self) -> Dict[str, Any]:
-        """벡터 DB 상세 정보 반환 (Cloud Storage와 동기화)"""
+        """벡터 DB 상세 정보 반환 (안전한 버전)"""
         logger.info(f"🔍 벡터 DB 정보 조회: 메모리 문서 {len(self.documents)}개, 임베딩 {len(self.embeddings)}개")
         
-        # Cloud Storage에서 실제 벡터 저장소 파일 확인
-        cloud_vectors = 0
+        # 기본값 설정
+        actual_vectors = len(self.embeddings)
+        dimensions = 0
         db_size = 0
         file_exists = False
         
+        # 차원수 계산 (메모리에서 우선 확인)
+        if self.embeddings and len(self.embeddings) > 0:
+            dimensions = len(self.embeddings[0])
+        elif self.embedding_model == "text-embedding-3-large":
+            dimensions = 3072  # text-embedding-3-large 기본 차원수
+        
+        # Cloud Storage 정보는 안전하게 확인 (오류 시 무시)
         if self.storage and hasattr(self.storage, 'bucket'):
             try:
                 vector_blob = self.storage.bucket.blob('vector_store/vector_store.pkl')
                 file_exists = vector_blob.exists()
                 if file_exists:
                     db_size = vector_blob.size
-                    # 실제 벡터 저장소 파일에서 벡터 수 확인
-                    try:
-                        vector_data = vector_blob.download_as_bytes()
-                        data = pickle.loads(vector_data)
-                        cloud_vectors = len(data.get('embeddings', []))
-                        logger.info(f"🔍 Cloud Storage 벡터 파일 크기: {db_size} bytes, 벡터 수: {cloud_vectors}개")
-                    except Exception as e:
-                        logger.warning(f"⚠️ 벡터 저장소 파일 로드 실패: {e}")
-                        cloud_vectors = 0
+                    logger.info(f"🔍 Cloud Storage 벡터 파일 크기: {db_size} bytes")
                 else:
-                    logger.warning("⚠️ Cloud Storage에 벡터 파일이 존재하지 않음")
+                    logger.info("ℹ️ Cloud Storage에 벡터 파일이 존재하지 않음")
             except Exception as e:
-                logger.warning(f"⚠️ 벡터 저장소 파일 크기 확인 실패: {e}")
-        
-        # 메모리와 Cloud Storage 중 더 정확한 값 사용
-        actual_vectors = max(len(self.embeddings), cloud_vectors)
-        
-        # 차원수 계산 (text-embedding-3-large는 3072차원)
-        dimensions = 0
-        if self.embeddings and len(self.embeddings) > 0:
-            dimensions = len(self.embeddings[0])
-        elif cloud_vectors > 0 and self.storage and hasattr(self.storage, 'bucket'):
-            # Cloud Storage에서 벡터 저장소 파일이 있으면 차원수 확인
-            try:
-                vector_blob = self.storage.bucket.blob('vector_store/vector_store.pkl')
-                if vector_blob.exists():
-                    vector_data = vector_blob.download_as_bytes()
-                    data = pickle.loads(vector_data)
-                    embeddings = data.get('embeddings', [])
-                    if embeddings and len(embeddings) > 0:
-                        dimensions = len(embeddings[0])
-            except Exception as e:
-                logger.warning(f"⚠️ 차원수 확인 실패: {e}")
-        
-        # text-embedding-3-large 모델의 기본 차원수
-        if dimensions == 0 and self.embedding_model == "text-embedding-3-large":
-            dimensions = 3072
+                logger.warning(f"⚠️ Cloud Storage 정보 확인 실패 (무시): {e}")
+                # 오류 시에도 기본 정보는 반환
         
         result = {
             'total_vectors': actual_vectors,
@@ -1195,8 +1172,7 @@ class RAGSystem:
             'index_type': 'pickle',
             'storage_path': 'Cloud Storage' if self.storage and hasattr(self.storage, 'bucket') else 'unknown',
             'file_exists': file_exists,
-            'memory_vectors': len(self.embeddings),
-            'cloud_vectors': cloud_vectors
+            'embedding_model': self.embedding_model
         }
         
         logger.info(f"🔍 벡터 DB 정보 반환: {result}")
