@@ -101,11 +101,14 @@
                 
                 <!-- 업로드 진행률 -->
                 <div id="uploadProgress" class="upload-progress" style="display: none;">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill"></div>
+                    <div class="progress-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <span class="progress-text" id="uploadPercentage">0%</span>
                     </div>
                     <p id="uploadStatus">업로드 준비 중...</p>
-                    <p id="uploadPercentage">0%</p>
+                    <p id="uploadFileProgress">파일 0/0</p>
                 </div>
             </div>
 
@@ -116,15 +119,27 @@
                     <button class="btn-action" onclick="selectAllFiles()">
                         <i class="fas fa-check-square"></i> 전체 선택
                     </button>
+                    <button class="btn-action danger" onclick="deleteSelectedFiles()">
+                        <i class="fas fa-trash"></i> 선택 삭제
+                    </button>
                     <button class="btn-action" onclick="embedSelectedFiles()">
                         <i class="fas fa-magic"></i> 선택 임베딩
                     </button>
                     <button class="btn-action" onclick="embedAllFiles()">
                         <i class="fas fa-sync-alt"></i> 전체 임베딩
                     </button>
-                    <button class="btn-action danger" onclick="deleteSelectedFiles()">
-                        <i class="fas fa-trash"></i> 선택 삭제
-                    </button>
+                </div>
+                
+                <!-- 임베딩 진행률 표시 -->
+                <div id="embeddingProgress" class="embedding-progress" style="display: none;">
+                    <div class="progress-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="embeddingProgressFill"></div>
+                        </div>
+                        <span class="progress-text" id="embeddingProgressText">0%</span>
+                    </div>
+                    <p id="embeddingStatus">임베딩 준비 중...</p>
+                    <p id="embeddingFileProgress">파일 0/0</p>
                 </div>
                 
                 <div class="files-table">
@@ -300,14 +315,23 @@ function uploadAndEmbed() {
         formData.append('files[]', file);
     }
     
-    showUploadProgress();
+    const totalFiles = fileInput.files.length;
+    showUploadProgress(totalFiles);
     
     // 진행률 시뮬레이션 (실제로는 서버에서 받아야 함)
     let progress = 0;
+    let currentFile = 0;
     const progressInterval = setInterval(() => {
         progress += Math.random() * 15;
         if (progress > 90) progress = 90;
-        updateUploadProgress(Math.round(progress));
+        
+        // 파일별 진행률 계산
+        const fileProgress = Math.floor(progress / totalFiles);
+        if (fileProgress > currentFile) {
+            currentFile = fileProgress;
+        }
+        
+        updateUploadProgress(Math.round(progress), currentFile, totalFiles);
     }, 200);
     
     fetch('/api/upload-and-embed', {
@@ -317,7 +341,7 @@ function uploadAndEmbed() {
     .then(response => {
         console.log('📡 업로드 API 응답 상태:', response.status);
         clearInterval(progressInterval);
-        updateUploadProgress(100);
+        updateUploadProgress(100, totalFiles, totalFiles);
         return response.json();
     })
     .then(data => {
@@ -588,7 +612,8 @@ function embedSelectedFiles() {
     showConfirmModal(
         `선택된 ${selectedFiles.length}개 파일을 임베딩하시겠습니까?`,
         () => {
-            showNotification('선택된 파일들의 임베딩을 시작합니다...', 'info');
+            showEmbeddingProgress(selectedFiles.length);
+            updateEmbeddingProgress(0, `선택된 ${selectedFiles.length}개 파일 임베딩 시작...`, 0, selectedFiles.length);
             
             fetch('/api/admin/embed-selected', {
                 method: 'POST',
@@ -600,18 +625,22 @@ function embedSelectedFiles() {
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
+                    hideEmbeddingProgress();
                     showNotification(data.error, 'error');
                 } else {
-                    showNotification(`선택된 ${data.embedded_count || selectedFiles.length}개 파일의 임베딩이 완료되었습니다.`, 'success');
-                    selectedFiles = [];
-                    // 파일 목록과 대시보드 새로고침
+                    updateEmbeddingProgress(100, '임베딩 완료!', selectedFiles.length, selectedFiles.length);
                     setTimeout(() => {
+                        hideEmbeddingProgress();
+                        showNotification(`선택된 ${data.embedded_count || selectedFiles.length}개 파일의 임베딩이 완료되었습니다.`, 'success');
+                        selectedFiles = [];
+                        // 파일 목록과 대시보드 새로고침
                         loadFilesList();
                         loadDashboardData();
                     }, 1000);
                 }
             })
             .catch(error => {
+                hideEmbeddingProgress();
                 showNotification('임베딩 중 오류가 발생했습니다.', 'error');
                 console.error('Error:', error);
             });
@@ -624,48 +653,116 @@ function embedAllFiles() {
     showConfirmModal(
         '모든 파일에 대해 전체 임베딩을 실행하시겠습니까?',
         () => {
-            showNotification('전체 임베딩을 시작합니다...', 'info');
-            
-            fetch('/api/admin/rebuild', { method: 'POST' })
+            // 먼저 파일 목록을 가져와서 전체 파일 수 확인
+            fetch('/api/files')
             .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    showNotification(data.error, 'error');
-                } else {
-                    showNotification('전체 임베딩이 완료되었습니다.', 'success');
-                    // 파일 목록과 대시보드 새로고침
-                    setTimeout(() => {
-                        loadFilesList();
-                        loadDashboardData();
-                    }, 1000);
-                }
-            })
-            .catch(error => {
-                showNotification('전체 임베딩 중 오류가 발생했습니다.', 'error');
-                console.error('Error:', error);
-                // 오류가 발생해도 파일 목록은 새로고침
+            .then(filesData => {
+                const totalFiles = filesData.files ? filesData.files.length : 0;
+                showEmbeddingProgress(totalFiles);
+                updateEmbeddingProgress(0, '전체 임베딩 시작...', 0, totalFiles);
+                
+                fetch('/api/admin/rebuild', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        hideEmbeddingProgress();
+                        showNotification(data.error, 'error');
+                    } else {
+                        updateEmbeddingProgress(100, '전체 임베딩 완료!', totalFiles, totalFiles);
+                        setTimeout(() => {
+                            hideEmbeddingProgress();
+                            showNotification('전체 임베딩이 완료되었습니다.', 'success');
+                            // 파일 목록과 대시보드 새로고침
+                            loadFilesList();
+                            loadDashboardData();
+                        }, 1000);
+                    }
+                })
+                .catch(error => {
+                    hideEmbeddingProgress();
+                    showNotification('전체 임베딩 중 오류가 발생했습니다.', 'error');
+                    console.error('Error:', error);
+                    // 오류가 발생해도 파일 목록은 새로고침
                     loadFilesList();
                     loadDashboardData();
+                });
+            })
+            .catch(error => {
+                // 파일 목록 조회 실패 시에도 임베딩 진행
+                showEmbeddingProgress();
+                updateEmbeddingProgress(0, '전체 임베딩 시작...');
+                
+                fetch('/api/admin/rebuild', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        hideEmbeddingProgress();
+                        showNotification(data.error, 'error');
+                    } else {
+                        updateEmbeddingProgress(100, '전체 임베딩 완료!');
+                        setTimeout(() => {
+                            hideEmbeddingProgress();
+                            showNotification('전체 임베딩이 완료되었습니다.', 'success');
+                            loadFilesList();
+                            loadDashboardData();
+                        }, 1000);
+                    }
+                })
+                .catch(error => {
+                    hideEmbeddingProgress();
+                    showNotification('전체 임베딩 중 오류가 발생했습니다.', 'error');
+                    console.error('Error:', error);
+                    loadFilesList();
+                    loadDashboardData();
+                });
             });
         }
     );
 }
 
 // 업로드 진행률 표시
-function showUploadProgress() {
+function showUploadProgress(totalFiles = 0) {
     document.getElementById('uploadProgress').style.display = 'block';
     document.getElementById('uploadStatus').textContent = '업로드 중...';
     document.getElementById('uploadPercentage').textContent = '0%';
     document.getElementById('progressFill').style.width = '0%';
+    document.getElementById('uploadFileProgress').textContent = `파일 0/${totalFiles}`;
 }
 
 function hideUploadProgress() {
     document.getElementById('uploadProgress').style.display = 'none';
 }
 
-function updateUploadProgress(percentage) {
+function updateUploadProgress(percentage, currentFile = 0, totalFiles = 0) {
     document.getElementById('uploadPercentage').textContent = `${percentage}%`;
     document.getElementById('progressFill').style.width = `${percentage}%`;
+    if (totalFiles > 0) {
+        document.getElementById('uploadFileProgress').textContent = `파일 ${currentFile}/${totalFiles}`;
+    }
+}
+
+// 임베딩 진행률 표시
+function showEmbeddingProgress(totalFiles = 0) {
+    document.getElementById('embeddingProgress').style.display = 'block';
+    document.getElementById('embeddingStatus').textContent = '임베딩 준비 중...';
+    document.getElementById('embeddingProgressText').textContent = '0%';
+    document.getElementById('embeddingProgressFill').style.width = '0%';
+    document.getElementById('embeddingFileProgress').textContent = `파일 0/${totalFiles}`;
+}
+
+function hideEmbeddingProgress() {
+    document.getElementById('embeddingProgress').style.display = 'none';
+}
+
+function updateEmbeddingProgress(percentage, status, currentFile = 0, totalFiles = 0) {
+    document.getElementById('embeddingProgressText').textContent = `${percentage}%`;
+    document.getElementById('embeddingProgressFill').style.width = `${percentage}%`;
+    if (status) {
+        document.getElementById('embeddingStatus').textContent = status;
+    }
+    if (totalFiles > 0) {
+        document.getElementById('embeddingFileProgress').textContent = `파일 ${currentFile}/${totalFiles}`;
+    }
 }
 
 // 날짜 시간 포맷팅

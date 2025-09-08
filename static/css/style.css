@@ -821,3 +821,78 @@ footer {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--primary-dark);
 }
+
+/* 임베딩 진행률 스타일 */
+.embedding-progress {
+    margin-top: 15px;
+    padding: 15px;
+    background-color: var(--white-color);
+    border-radius: 8px;
+    box-shadow: 0 2px 4px var(--shadow-color);
+    border: 1px solid var(--border-color);
+}
+
+.progress-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.progress-bar {
+    flex: 1;
+    height: 20px;
+    background-color: #f0f0f0;
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary-color), var(--primary-dark));
+    border-radius: 10px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.progress-text {
+    font-weight: bold;
+    color: var(--primary-color);
+    min-width: 40px;
+    text-align: right;
+}
+
+#embeddingStatus {
+    margin: 0;
+    color: var(--text-color);
+    font-size: 14px;
+}
+
+/* 업로드 진행률 스타일 */
+.upload-progress {
+    margin-top: 15px;
+    padding: 15px;
+    background-color: var(--white-color);
+    border-radius: 8px;
+    box-shadow: 0 2px 4px var(--shadow-color);
+    border: 1px solid var(--border-color);
+}
+
+#uploadStatus {
+    margin: 0 0 5px 0;
+    color: var(--text-color);
+    font-size: 14px;
+}
+
+#uploadFileProgress {
+    margin: 0;
+    color: var(--light-text-color);
+    font-size: 12px;
+}
+
+#embeddingFileProgress {
+    margin: 0;
+    color: var(--light-text-color);
+    font-size: 12px;
+}
