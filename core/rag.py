@@ -853,7 +853,7 @@ class RAGSystem:
             # 디버깅을 위한 로그 추가
             logger.info(f"🔍 검색 결과: 상위 5개 유사도 점수 = {[f'{score:.3f}' for score, _ in top_docs[:5]]}")
             
-            if not top_docs or top_docs[0][0] < 0.03:  # 유사도 임계값 더 낮춤
+            if not top_docs or top_docs[0][0] < 0.15:  # 유사도 임계값 조정 (0.03 → 0.15)
                 logger.warning(f"⚠️ 유사도가 너무 낮음: 최고 점수 = {top_docs[0][0] if top_docs else 0}")
                 return "관련 문서를 찾을 수 없습니다."
             
