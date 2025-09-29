@@ -225,8 +225,17 @@ class RAGSystem:
             # 같은 파일명의 문서들을 찾아서 제거
             indices_to_remove = []
             for i, doc in enumerate(self.documents):
-                if doc.get('filename') == filename or doc.get('stored_filename') == filename:
+                # stored_filename과 filename 모두 비교
+                doc_filename = doc.get('filename', '')
+                doc_stored_filename = doc.get('stored_filename', '')
+                
+                # 정확한 매칭을 위해 여러 조건 확인
+                if (doc_filename == filename or 
+                    doc_stored_filename == filename or
+                    filename in doc_filename or 
+                    filename in doc_stored_filename):
                     indices_to_remove.append(i)
+                    logger.info(f"🔍 매칭된 문서 발견: {doc_filename} / {doc_stored_filename} == {filename}")
             
             if indices_to_remove:
                 logger.info(f"🗑️ 기존 문서 제거: {filename} ({len(indices_to_remove)}개 청크)")
@@ -234,18 +243,34 @@ class RAGSystem:
                 # 역순으로 제거 (인덱스가 변경되지 않도록)
                 for i in reversed(indices_to_remove):
                     # vector_store에서도 제거
-                    chunk_id = self.documents[i].get('chunk_id', i)
-                    vector_key = f"{filename}_{chunk_id}"
-                    if vector_key in self.vector_store:
-                        del self.vector_store[vector_key]
+                    doc = self.documents[i]
+                    chunk_id = doc.get('chunk_id', i)
+                    doc_filename = doc.get('filename', '')
+                    doc_stored_filename = doc.get('stored_filename', '')
+                    
+                    # 여러 가능한 vector_key 패턴 시도
+                    possible_keys = [
+                        f"{doc_filename}_{chunk_id}",
+                        f"{doc_stored_filename}_{chunk_id}",
+                        f"{filename}_{chunk_id}"
+                    ]
+                    
+                    for vector_key in possible_keys:
+                        if vector_key in self.vector_store:
+                            del self.vector_store[vector_key]
+                            logger.info(f"🗑️ 벡터 키 제거: {vector_key}")
                     
                     # documents와 embeddings에서 제거
                     del self.documents[i]
                     del self.embeddings[i]
                 
-                logger.info(f"✅ 기존 문서 제거 완료: {filename}")
+                logger.info(f"✅ 기존 문서 제거 완료: {filename} ({len(indices_to_remove)}개 청크)")
+            else:
+                logger.info(f"ℹ️ 제거할 기존 문서 없음: {filename}")
         except Exception as e:
             logger.warning(f"⚠️ 기존 문서 제거 중 오류: {e}")
+            import traceback
+            logger.error(f"❌ 상세 오류: {traceback.format_exc()}")
     
     def _save_vector_store(self):
         """벡터 저장소 저장 (재시도 로직 포함)"""
@@ -281,8 +306,17 @@ class RAGSystem:
                                 # 파일 크기 확인
                                 actual_size = vector_blob.size
                                 if actual_size == len(vector_data):
-                                    logger.info(f"✅ 벡터 저장소 파일 저장 및 검증 완료: {actual_size} bytes")
-                                    return True
+                                    # 추가 검증: 저장된 데이터 로드하여 무결성 확인
+                                    try:
+                                        downloaded_data = vector_blob.download_as_bytes()
+                                        if len(downloaded_data) == len(vector_data):
+                                            logger.info(f"✅ 벡터 저장소 파일 저장 및 검증 완료: {actual_size} bytes")
+                                            logger.info(f"🔍 저장된 문서 수: {len(self.documents)}개, 임베딩 수: {len(self.embeddings)}개")
+                                            return True
+                                        else:
+                                            logger.error(f"❌ 다운로드된 데이터 크기 불일치: 예상 {len(vector_data)} bytes, 실제 {len(downloaded_data)} bytes")
+                                    except Exception as verify_error:
+                                        logger.error(f"❌ 저장된 데이터 검증 실패: {verify_error}")
                                 else:
                                     logger.warning(f"⚠️ 파일 크기 불일치: 예상 {len(vector_data)} bytes, 실제 {actual_size} bytes")
                             else:
@@ -565,8 +599,8 @@ class RAGSystem:
             logger.info(f"📄 문서 추가 시작: {actual_filename} (저장된 파일명: {stored_filename})")
             logger.info(f"📄 파일 URL: {file_url}")
             
-            # 기존 임베딩이 있다면 제거
-            self.remove_document(actual_filename)
+            # 기존 임베딩이 있다면 제거 (stored_filename으로 정확한 매칭)
+            self._remove_existing_document(stored_filename)
             
             # 문서 로드
             logger.info(f"📖 문서 로드 시도: {stored_filename}")
@@ -612,7 +646,10 @@ class RAGSystem:
                 return False
             
             # 벡터 저장소 저장
-            self._save_vector_store()
+            save_success = self._save_vector_store()
+            if not save_success:
+                logger.error(f"❌ 벡터 저장소 저장 실패: {stored_filename}")
+                return False
             
             # 스토리지에 임베딩 상태 표시
             try:
