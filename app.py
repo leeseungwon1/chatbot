@@ -366,6 +366,10 @@ def upload_and_embed():
 @app.route('/api/files/<filename>', methods=['DELETE'])
 @admin_required
 def delete_file(filename):
+    # 초기화 시도
+    if not ensure_initialization():
+        return jsonify({'error': '시스템 초기화에 실패했습니다.'}), 500
+    
     if not storage:
         return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
     
@@ -428,6 +432,10 @@ def delete_file(filename):
 def list_files():
     """파일 목록 반환"""
     try:
+        # 초기화 시도
+        if not ensure_initialization():
+            return jsonify({'error': '시스템 초기화에 실패했습니다.'}), 500
+        
         if not storage:
             logger.error("❌ 스토리지가 초기화되지 않았습니다.")
             return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
@@ -443,6 +451,10 @@ def list_files():
 @admin_required
 def batch_delete_files():
     """여러 파일 일괄 삭제"""
+    # 초기화 시도
+    if not ensure_initialization():
+        return jsonify({'error': '시스템 초기화에 실패했습니다.'}), 500
+    
     if not storage:
         return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
     
@@ -648,6 +660,10 @@ def embed_selected_files():
 @app.route('/api/admin/delete-all', methods=['POST'])
 @admin_required
 def delete_all_files():
+    # 초기화 시도
+    if not ensure_initialization():
+        return jsonify({'error': '시스템 초기화에 실패했습니다.'}), 500
+    
     if not storage:
         return jsonify({'error': '스토리지가 초기화되지 않았습니다.'}), 500
     
